@@ -133,13 +133,16 @@ def show_profile_popup(m):
     
     st.info(f"📍 Present Address: {m.get('Present', 'N/A')}")
 
-    pdf_file = generate_pdf(m, img_path)
-    st.download_button(
-        label="📥 DOWNLOAD FULL PROFILE (PDF)",
-        data=pdf_file,
-        file_name=f"Profile_{m['ID']}.pdf",
-        mime="application/octet-stream",
-        use_container_width=True
+    # এই ফাংশনটি ফাইলের শেষে বা উপরে কোথাও একবার লিখে দিন
+def get_pdf_download_link(pdf_file, filename):
+    b64 = base64.b64encode(pdf_file.getvalue()).decode()
+    # HTML কোড যা মোবাইল ব্রাউজারকে ফোর্স ডাউনলোড করাবে
+    return f'<a href="data:application/octet-stream;base64,{b64}" download="{filename}" style="text-decoration:none;"><div style="background-color:#38BDF8; color:white; padding:10px; border-radius:10px; text-align:center; font-weight:bold;">📥 DOWNLOAD FULL PROFILE (PDF)</div></a>'
+
+# প্রোফাইল পপ-আপের ভেতরে আগের 'st.download_button' সরিয়ে এই নিচের ৩ লাইন দিন:
+pdf_file = generate_pdf(m, img_path)
+download_html = get_pdf_download_link(pdf_file, f"Profile_{m['ID']}.pdf")
+st.markdown(download_html, unsafe_allow_html=True)
     )
 
 # --- ৪. মেইন মেম্বার পেইজ ---
@@ -189,4 +192,5 @@ def show():
             
             if st.button(f"View Profile", key=f"btn_{m['ID']}", use_container_width=True):
                 show_profile_popup(m)
+
 
