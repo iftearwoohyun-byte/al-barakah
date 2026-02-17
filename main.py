@@ -1,7 +1,6 @@
 import streamlit as st
 import os
-import home, members, savings, statement, bank, ledger, statistics, receipt
-# নিশ্চিত করুন import এর আগে কোনো গ্যাপ নেই
+import home, members, savings, statement, bank, ledger, statistics, receipts
 
 # ---------------- Page Configuration ----------------
 st.set_page_config(
@@ -136,5 +135,3 @@ else:
             st.rerun()
 
     pages[st.session_state.page].show()
-
-
