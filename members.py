@@ -138,7 +138,7 @@ def show_profile_popup(m):
         label="📥 DOWNLOAD FULL PROFILE (PDF)",
         data=pdf_file,
         file_name=f"Profile_{m['ID']}.pdf",
-        mime="application/pdf",
+        mime="application/octet-stream",
         use_container_width=True
     )
 
@@ -189,3 +189,4 @@ def show():
             
             if st.button(f"View Profile", key=f"btn_{m['ID']}", use_container_width=True):
                 show_profile_popup(m)
+
