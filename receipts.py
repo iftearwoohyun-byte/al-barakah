@@ -5,7 +5,7 @@ from datetime import datetime
 import io
 import zipfile
 
-# --- Configuration (আপনার কোড অনুযায়ী) ---
+# --- Configuration ---
 SOCIETY_NAME = "Al-Barakah Business Society"
 ADDRESS = "Barahatia, Lohagara, Chattogram"
 SHARE_VALUE = 5000
@@ -13,33 +13,34 @@ THANKS_MSG = "May Allah grant barakah in your wealth."
 LOGO_FILE = "logo.png"
 SIGN_FILE = "signature.png"
 
-# মেম্বার লিস্ট (যদি ডাটাবেস ফাইল না থাকে তবে ডেমো ডাটা)
 try:
     from database import members_list
 except:
-    members_list = [
-        {"ID": 1, "Name": "Sample Member", "Share": 1}
-    ]
+    members_list = [{"ID": 1, "Name": "Sample Member", "Share": 1}]
 
 def create_receipt_image(member, month, year):
-    """রসিদ ইমেজ তৈরির মূল লজিক (আপনার Pillow কোড)"""
     w, h = 3000, 2000 
     canvas = Image.new('RGB', (w, h), color=(255, 255, 255))
     draw = ImageDraw.Draw(canvas)
     
-    # Fonts loading (Streamlit এর জন্য ফন্ট ফাইল না থাকলে default নেবে)
-    try:
-        f_title = ImageFont.truetype("arialbd.ttf", 140)
-        f_header = ImageFont.truetype("arial.ttf", 65)
-        f_label = ImageFont.truetype("arialbd.ttf", 80)
-        f_value = ImageFont.truetype("arial.ttf", 80)
-        f_islamic = ImageFont.truetype("ariali.ttf", 55) 
-    except:
-        f_title = f_header = f_label = f_value = f_islamic = ImageFont.load_default()
+    # --- ফন্ট আপলোড ছাড়াই বড় ফন্ট ব্যবহারের লজিক ---
+    def get_font(font_size):
+        try:
+            # এটি পিলোর নতুন ভার্সনে ফন্ট ফাইল ছাড়াই বড় ফন্ট তৈরি করে
+            return ImageFont.load_default(size=font_size)
+        except:
+            # পুরনো ভার্সন হলে ডিফল্ট (যা ছোট দেখাবে)
+            return ImageFont.load_default()
+
+    f_title = get_font(140)
+    f_header = get_font(65)
+    f_label = get_font(80)
+    f_value = get_font(80)
+    f_islamic = get_font(55)
 
     # ১. বর্ডার ও ডিজাইন
-    draw.rectangle([40, 40, w-40, h-40], outline=(0, 51, 102), width=25) # Navy Blue
-    draw.rectangle([80, 80, w-80, h-80], outline=(218, 165, 32), width=8) # Gold
+    draw.rectangle([40, 40, w-40, h-40], outline=(0, 51, 102), width=25)
+    draw.rectangle([80, 80, w-80, h-80], outline=(218, 165, 32), width=8)
     draw.rectangle([88, 88, w-88, 500], fill=(240, 245, 255))
 
     # ২. লোগো
@@ -97,8 +98,10 @@ def show():
     """, unsafe_allow_html=True)
 
     st.markdown('<div class="receipt-header"><h1>🧾 Bulk Receipt Generation</h1></div>', unsafe_allow_html=True)
+    
+    # ডাটা সেভ না হওয়ার সতর্কবার্তা
+    st.warning("⚠️ সতর্কতা: আপনি যে ডাটা এন্ট্রি করছেন তা সাময়িক। রিফ্রেশ করলে ডাটা মুছে যাবে। স্থায়ীভাবে সেভ করতে Google Sheets কানেক্ট করা প্রয়োজন।")
 
-    # ইনপুট ফর্ম
     with st.container(border=True):
         col1, col2 = st.columns(2)
         with col1:
@@ -113,23 +116,15 @@ def show():
         
         with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
             for idx, member in enumerate(members_list):
-                # ইমেজ তৈরি
                 receipt_img = create_receipt_image(member, month, year)
-                
-                # ইমেজ মেমরিতে সেভ করা (হার্ডড্রাইভে না জমিয়ে সরাসরি বাফারে)
                 img_byte_arr = io.BytesIO()
                 receipt_img.save(img_byte_arr, format='JPEG', quality=90)
-                
-                # জিপ ফাইলে যোগ করা
                 file_name = f"Receipt_{member['ID']}_{month}.jpg"
                 zip_file.writestr(file_name, img_byte_arr.getvalue())
-                
-                # প্রগ্রেস আপডেট
                 progress_bar.progress((idx + 1) / len(members_list))
         
         st.success(f"Successfully generated {len(members_list)} receipts!")
         
-        # জিপ ডাউনলোড বাটন
         st.download_button(
             label="📥 DOWNLOAD ALL RECEIPTS (ZIP)",
             data=zip_buffer.getvalue(),
@@ -138,6 +133,5 @@ def show():
             use_container_width=True
         )
 
-        # একটি ডেমো প্রিভিউ দেখানো
         st.markdown("### Preview (Last Generated):")
         st.image(receipt_img, caption=f"Receipt Preview for {members_list[-1]['Name']}", use_container_width=True)
