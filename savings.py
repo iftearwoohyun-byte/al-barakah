@@ -1,120 +1,115 @@
 import streamlit as st
 import pandas as pd
-import database as db  # গুগল শিট কানেকশন
+import database as db 
 from datetime import datetime
 
-# --- ১. ডাটা লোড ফাংশন (এখন গুগল শিট থেকে আসবে) ---
-def load_all_savings_from_sheet():
+def load_all_savings():
     sheet = db.connect_db()
     if sheet:
         try:
+            # সরাসরি Savings ট্যাব থেকে সব ডাটা পড়া
             worksheet = sheet.worksheet("Savings")
-            return worksheet.get_all_records()
-        except: return []
-    return []
+            data = worksheet.get_all_records()
+            return data, worksheet
+        except Exception as e:
+            st.error(f"Error loading sheet: {e}")
+            return [], None
+    return [], None
 
-# --- ২. কিস্তি জমার পপ-আপ (ডিজাইন একদম আগের মতো) ---
 @st.dialog("Collect Savings")
 def add_deposit():
     st.markdown("<h3 style='color:#1A365D;'>নতুন সঞ্চয় জমা করুন</h3>", unsafe_allow_html=True)
-    
-    # মেম্বার ডাটা গুগল শিট থেকে আসবে
     members_data = db.get_live_data() 
     
     if not members_data:
-        st.error("মেম্বার লিস্ট খালি! আগে মেম্বার যোগ করুন।")
+        st.error("মেম্বার লিস্ট পাওয়া যায়নি!")
         return
 
+    # মেম্বার লিস্ট তৈরি
     names = [f"{m['Name']} (ID: {m['ID']})" for m in members_data]
     selected_member = st.selectbox("মেম্বার সিলেক্ট করুন", names)
     
-    # মাস তৈরির লজিক (আপনার অরিজিনাল ২৫-২৭ সাল)
-    months = []
-    for year in ["25", "26", "27"]:
-        for m in ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]:
-            if year == "25" and m in ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct"]: continue
-            if year == "27" and m in ["Nov", "Dec"]: continue
-            months.append(f"{m}_{year}")
-    
+    # আপনার শিটের কলাম অনুযায়ী মাস (হুবহু শিটের নামের সাথে মিল থাকতে হবে)
+    months = ["Nov_25", "Dec_25", "Jan_26", "Feb_26", "Mar_26", "Apr_26", "May_26", "Jun_26", "Jul_26", "Aug_26", "Sep_26", "Oct_26"]
     selected_month = st.selectbox("মাস সিলেক্ট করুন", months)
     
     m_id = selected_member.split("(ID: ")[1].replace(")", "")
     member = next((m for m in members_data if str(m['ID']) == m_id), None)
-    default_amt = int(member.get('Share', 1)) * 5000 if member else 0
     
-    amount = st.text_input("জমার পরিমাণ (৫,০০০/শেয়ার)", value=str(default_amt))
+    # অটো টাকা ক্যালকুলেশন (শেয়ার * ৫০০০)
+    default_amt = int(member.get('Share', 1)) * 5000 if member else 5000
+    amount = st.text_input("জমার পরিমাণ", value=str(default_amt))
 
     if st.button("CONFIRM SAVE", type="primary", use_container_width=True):
-        today = datetime.now().strftime("%d/%m/%Y")
-        # গুগল শিটে জমা করার জন্য রো তৈরি
-        row = [today, m_id, member['Name'], amount, selected_month.split("_")[0], "20" + selected_month.split("_")[1]]
-        
-        if db.add_savings(row):
-            st.success("সফলভাবে সেভ হয়েছে!")
-            st.rerun()
-        else:
-            st.error("সেভ হতে সমস্যা হয়েছে!")
+        data, worksheet = load_all_savings()
+        if worksheet:
+            try:
+                # শিটে আইডি অনুযায়ী সঠিক রো (Row) খুঁজে বের করা
+                all_ids = worksheet.col_values(1) # প্রথম কলাম IDs
+                row_index = all_ids.index(str(m_id)) + 1
+                
+                # সঠিক মাস অনুযায়ী কলাম (Column) খুঁজে বের করা
+                headers = worksheet.row_values(1)
+                col_index = headers.index(selected_month) + 1
+                
+                # শিটে ডাটা আপডেট করা
+                worksheet.update_cell(row_index, col_index, amount)
+                
+                st.success(f"সফলভাবে {selected_month} এর জমা সেভ হয়েছে!")
+                st.rerun()
+            except ValueError:
+                st.error("মেম্বার আইডি বা মাসের কলাম শিটে খুঁজে পাওয়া যায়নি!")
+            except Exception as e:
+                st.error(f"সেভ করতে সমস্যা হয়েছে: {e}")
 
-# --- ৩. মেইন শো ফাংশন (ডিজাইন ও CSS আপনার অরিজিনালটা) ---
 def show():
+    # --- আপনার অরিজিনাল CSS ডিজাইন ---
     st.markdown("""
         <style>
-        .savings-container { background-color: #F0F4F8; padding: 10px; border-radius: 10px; }
         .savings-header { background-color: #1A365D; padding: 20px; text-align: center; border-radius: 8px; margin-bottom: 25px; }
-        .header-text { color: white !important; font-family: 'Segoe UI'; font-weight: bold; margin: 0; font-size: 24px; }
+        .header-text { color: white !important; font-family: 'Segoe UI'; font-weight: bold; font-size: 24px; }
         div.savings-btn-group button {
-            height: 100px !important; font-size: 18px !important; font-weight: bold !important;
+            height: 80px !important; font-size: 18px !important; font-weight: bold !important;
             background-color: #2D3748 !important; color: white !important; border-radius: 10px !important;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
         }
         thead tr th { background-color: #4A5568 !important; color: white !important; }
         </style>
     """, unsafe_allow_html=True)
 
-    st.markdown('<div class="savings-header"><h1 class="header-text">AL-BARAKAH SAVINGS LEDGER (2025-2027)</h1></div>', unsafe_allow_html=True)
+    st.markdown('<div class="savings-header"><h1 class="header-text">AL-BARAKAH SAVINGS LEDGER</h1></div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="savings-btn-group">', unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([2, 2, 4])
-    
+    col1, col2 = st.columns([2, 6])
     with col1:
         if st.button("➕\nADD SAVINGS", key="add_sav_btn"):
             add_deposit()
-            
-    with col2:
-        if st.button("🔄\nREFRESH", key="sync_sav_btn"):
-            st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
-
+    
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ৪. ডাটা টেবিল (আপনার আগের ক্যালকুলেশন লজিক)
-    savings_list = load_all_savings_from_sheet()
+    # ডাটা টেবিল দেখানো
+    savings_data, _ = load_all_savings()
     
-    if savings_list:
-        df_raw = pd.DataFrame(savings_list)
+    if savings_data:
+        df = pd.DataFrame(savings_data)
         
-        # আপনার আগের লজিক অনুযায়ী টেবিল সাজানো
-        table_rows = []
-        # ইউনিক মেম্বারদের জন্য গ্রুপিং (শিটে মেম্বার রিপিট হতে পারে)
-        unique_members = df_raw['ID'].unique()
+        # ক্যালকুলেশন লজিক
+        # মাস কলামগুলোর নাম দিন যেগুলো আপনি যোগ করতে চান
+        month_cols = ["Nov_25", "Dec_25", "Jan_26", "Feb_26", "Mar_26", "Apr_26"] # আপনার শিট অনুযায়ী
         
-        for m_id in unique_members:
-            m_data = df_raw[df_raw['ID'] == m_id]
-            total_bal = pd.to_numeric(m_data['Amount']).sum()
-            last_p = m_data.iloc[-1]['Month'] + " " + str(m_data.iloc[-1]['Year'])
-            
-            table_rows.append({
-                "ID": f"{int(m_id):03d}",
-                "Member Name": m_data.iloc[-1]['Name'],
-                "Last Paid": last_p,
-                "Total Balance": f"{total_bal:,.2f}"
-            })
-
-        df = pd.DataFrame(table_rows)
-        search = st.text_input("🔍 মেম্বার খুঁজুন (নাম বা আইডি)", placeholder="Search here...")
+        # টোটাল ব্যালেন্স বের করা
+        for col in month_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        
+        df['Total Balance'] = df[month_cols].sum(axis=1)
+        
+        # আপনার সুন্দর টেবিল ভিউ
+        display_df = df[['ID', 'Name', 'Shares', 'Total Balance']].copy()
+        display_df['Total Balance'] = display_df['Total Balance'].map('{:,.2f}'.format)
+        
+        search = st.text_input("🔍 মেম্বার খুঁজুন", placeholder="নাম বা আইডি...")
         if search:
-            df = df[df['Member Name'].str.contains(search, case=False) | df['ID'].str.contains(search)]
+            display_df = display_df[display_df['Name'].str.contains(search, case=False) | display_df['ID'].astype(str).str.contains(search)]
 
-        st.table(df) # আপনার অরিজিনাল স্ট্যাটিক টেবিল
+        st.table(display_df)
     else:
-        st.info("কোনো ডাটা পাওয়া যায়নি।")
+        st.info("গুগল শিটে কোনো সঞ্চয়ের ডাটা পাওয়া যায়নি।")
