@@ -1,41 +1,31 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
 from datetime import datetime
+import database as db  # আপনার গুগল শিট কানেকশন ফাইল
 
-# --- ১. ডাটাবেজ ফাংশন (হুবহু আগের মতো) ---
-DB_NAME = "somiti_ultimate_v5.db"
-
-def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    cur = conn.cursor()
-    cur.execute('''CREATE TABLE IF NOT EXISTS fdr_data 
-                  (id INTEGER PRIMARY KEY AUTOINCREMENT, open_date TEXT, mature_date TEXT, 
-                   amount REAL, status TEXT, link TEXT)''')
-    cur.execute('''CREATE TABLE IF NOT EXISTS savings_data (balance REAL)''')
-    cur.execute("SELECT COUNT(*) FROM savings_data")
-    if cur.fetchone()[0] == 0: 
-        cur.execute("INSERT INTO savings_data VALUES (0.0)")
-    conn.commit()
-    conn.close()
-
+# --- ১. ডাটাবেজ ফাংশন (গুগল শিট এডাপ্টেশন) ---
 def get_savings_bal():
-    conn = sqlite3.connect(DB_NAME)
-    cur = conn.cursor()
-    cur.execute("SELECT balance FROM savings_data")
-    bal = cur.fetchone()[0]
-    conn.close()
-    return bal
+    conn = db.connect_db()
+    if conn:
+        try:
+            worksheet = conn.worksheet("Bank_Savings")
+            val = worksheet.cell(2, 1).value # ২য় সারি, ১ম কলাম থেকে ব্যালেন্স নেবে
+            return float(val) if val else 0.0
+        except: return 0.0
+    return 0.0
 
 def get_fdr_list():
-    conn = sqlite3.connect(DB_NAME)
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM fdr_data ORDER BY id DESC")
-    data = cur.fetchall()
-    conn.close()
-    return data
+    conn = db.connect_db()
+    if conn:
+        try:
+            worksheet = conn.worksheet("FDR_Data")
+            data = worksheet.get_all_records()
+            # লিস্ট ফরম্যাটে রিটার্ন করা হচ্ছে যাতে আপনার লুপে সমস্যা না হয়
+            return [[r['ID'], r['Open_Date'], r['Mature_Date'], r['Amount'], r['Status'], r['Link']] for r in data]
+        except: return []
+    return []
 
-# --- ২. FDR ফর্ম (অ্যাডমিন শুধুমাত্র ব্যবহার করবে) ---
+# --- ২. FDR ফর্ম (গুগল শিট কানেকশনসহ) ---
 @st.dialog("➕ ADD NEW FDR")
 def open_add_fdr_form():
     st.write("### NEW FDR ENTRY")
@@ -46,23 +36,25 @@ def open_add_fdr_form():
     status = st.selectbox("Status", ["Active", "Matured"])
     
     if st.button("SAVE RECORD", type="primary", use_container_width=True):
-        conn = sqlite3.connect(DB_NAME)
-        cur = conn.cursor()
-        cur.execute("INSERT INTO fdr_data (open_date, mature_date, amount, status, link) VALUES (?,?,?,?,?)",
-                    (o_date.strftime('%m/%d/%y'), m_date.strftime('%m/%d/%y'), amount, status, link))
-        conn.commit()
-        conn.close()
-        st.success("FDR Saved Successfully!")
-        st.rerun()
+        conn = db.connect_db()
+        if conn:
+            worksheet = conn.worksheet("FDR_Data")
+            new_id = len(worksheet.get_all_values())
+            worksheet.append_row([
+                new_id, 
+                o_date.strftime('%m/%d/%y'), 
+                m_date.strftime('%m/%d/%y'), 
+                amount, 
+                status, 
+                link
+            ])
+            st.success("FDR Saved to Google Sheet!")
+            st.rerun()
 
-# --- ৩. মেইন শো ফাংশন (শর্ত সহ আপডেট করা) ---
+# --- ৩. মেইন শো ফাংশন (ডিজাইন অপরিবর্তিত) ---
 def show():
-    init_db()
-    
-    # সেশন স্টেট থেকে রোল চেক করা
     user_role = st.session_state.get("role", "Member")
     
-    # লাক্সারি ডার্ক থিম CSS (হুবহু আগের মতো)
     st.markdown("""
         <style>
         .stApp { background-color: #0F172A; }
@@ -76,12 +68,11 @@ def show():
 
     st.markdown("<h1>SOCIETY BANKING SYSTEM</h1>", unsafe_allow_html=True)
 
-    # ড্যাশবোর্ড মেনু
     tab1, tab2, tab3 = st.tabs(["🏠 HOME", "💰 FDR LIST", "🏦 SAVINGS"])
 
-    # --- HOME TAB (সবাই দেখতে পাবে) ---
     with tab1:
-        fdr_total = sum(r[3] for r in get_fdr_list())
+        fdr_list = get_fdr_list()
+        fdr_total = sum(float(r[3]) for r in fdr_list)
         st.markdown(f"""
             <div class="card-container">
                 <div class="bank-card">
@@ -95,12 +86,10 @@ def show():
             </div>
         """, unsafe_allow_html=True)
 
-    # --- FDR LIST TAB ---
     with tab2:
         col_h1, col_h2 = st.columns([3, 1])
         with col_h1: st.write("### FDR Grid View")
         
-        # শর্ত: শুধুমাত্র এডমিন FDR যোগ করতে পারবে
         with col_h2: 
             if user_role == "Admin":
                 if st.button("➕ ADD FDR", use_container_width=True):
@@ -109,37 +98,40 @@ def show():
                 st.info("View Only Mode")
 
         fdr_list = get_fdr_list()
-        cols = st.columns(3)
-        
-        for i, row in enumerate(fdr_list):
-            with cols[i % 3]:
-                try:
-                    dt = datetime.strptime(row[1], '%m/%d/%y')
-                    month_year = dt.strftime("%B'%y")
-                except: month_year = row[1]
-                
-                status_color = "#10B981" if row[4] == "Active" else "#F59E0B"
-                
-                with st.container(border=True):
-                    st.markdown(f"**{month_year}**")
-                    st.markdown(f"### ৳ {row[3]:,.0f}")
-                    st.markdown(f"<span style='color:{status_color}; font-weight:bold;'>{row[4].upper()}</span>", unsafe_allow_html=True)
+        if not fdr_list:
+            st.info("No FDR records found in Google Sheets.")
+        else:
+            cols = st.columns(3)
+            for i, row in enumerate(fdr_list):
+                with cols[i % 3]:
+                    try:
+                        dt = datetime.strptime(str(row[1]), '%m/%d/%y')
+                        month_year = dt.strftime("%B'%y")
+                    except: month_year = row[1]
                     
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        if row[5]: st.link_button("🌐 Open", row[5])
+                    status_color = "#10B981" if row[4] == "Active" else "#F59E0B"
                     
-                    # শর্ত: শুধুমাত্র এডমিন ডিলিট বাটন দেখতে পাবে
-                    with c2:
-                        if user_role == "Admin":
-                            if st.button("🗑️", key=f"del_{row[0]}", help="Delete this FDR"):
-                                conn = sqlite3.connect(DB_NAME)
-                                cur = conn.cursor()
-                                cur.execute("DELETE FROM fdr_data WHERE id=?", (row[0],))
-                                conn.commit(); conn.close()
-                                st.rerun()
+                    with st.container(border=True):
+                        st.markdown(f"**{month_year}**")
+                        st.markdown(f"### ৳ {float(row[3]):,.0f}")
+                        st.markdown(f"<span style='color:{status_color}; font-weight:bold;'>{str(row[4]).upper()}</span>", unsafe_allow_html=True)
+                        
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            if row[5]: st.link_button("🌐 Open", row[5])
+                        
+                        with c2:
+                            if user_role == "Admin":
+                                if st.button("🗑️", key=f"del_{row[0]}", help="Delete"):
+                                    conn = db.connect_db()
+                                    ws = conn.worksheet("FDR_Data")
+                                    # ID খুঁজে বের করে রো ডিলিট করা
+                                    cells = ws.findall(str(row[0]))
+                                    for cell in cells:
+                                        if cell.col == 1:
+                                            ws.delete_rows(cell.row)
+                                            st.rerun()
 
-    # --- SAVINGS TAB ---
     with tab3:
         st.write("### Update Savings Balance")
         current_bal = get_savings_bal()
@@ -151,17 +143,16 @@ def show():
             </div>
         """, unsafe_allow_html=True)
         
-        # শর্ত: শুধুমাত্র এডমিন ব্যালেন্স আপডেট করতে পারবে
         if user_role == "Admin":
             st.write("<br>", unsafe_allow_html=True)
-            new_bal = st.number_input("Enter New Balance", value=current_bal)
+            new_bal = st.number_input("Enter New Balance", value=float(current_bal))
             
             if st.button("CONFIRM UPDATE", type="primary", use_container_width=True):
-                conn = sqlite3.connect(DB_NAME)
-                cur = conn.cursor()
-                cur.execute("UPDATE savings_data SET balance=?", (new_bal,))
-                conn.commit(); conn.close()
-                st.success("Balance Updated!")
-                st.rerun()
+                conn = db.connect_db()
+                if conn:
+                    worksheet = conn.worksheet("Bank_Savings")
+                    worksheet.update_cell(2, 1, new_bal) # ২য় সারি ১ম কলামে আপডেট হবে
+                    st.success("Balance Updated in Google Sheet!")
+                    st.rerun()
         else:
             st.warning("⚠️ Access Restricted: Only Admin can update savings balance.")
