@@ -1,172 +1,76 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+import plotly.express as px
 import database as db 
 
-# --- ১. মাস ও সাল বের করার ফাংশন ---
-def get_fdr_month_year(date_str):
-    try:
-        # তারিখ ফরম্যাট (MM/DD/YY) অনুযায়ী প্রসেস করা
-        dt = datetime.strptime(str(date_str), '%m/%d/%y')
-        return dt.strftime("%B"), dt.strftime("%Y")
-    except:
-        return "N/A", "N/A"
-
-# --- ২. ডাটাবেজ ফাংশন ---
-def get_savings_bal():
-    conn = db.connect_db()
-    if conn:
-        try:
-            ws = conn.worksheet("Bank_Savings")
-            return float(ws.cell(2, 1).value or 0)
-        except: return 0.0
-    return 0.0
-
-def get_fdr_list():
-    conn = db.connect_db()
-    if conn:
-        try:
-            ws = conn.worksheet("FDR_Data")
-            # ডুপ্লিকেট হেডার এরর এড়াতে pandas ব্যবহার করে ডাটা পড়া
-            data = ws.get_all_values()
-            if len(data) < 2: return []
-            
-            df = pd.DataFrame(data[1:], columns=data[0])
-            
-            # --- মাস অনুসারে সিরিয়াল করার লজিক ---
-            if 'Open_Date' in df.columns:
-                df['temp_date'] = pd.to_datetime(df['Open_Date'], format='%m/%d/%y', errors='coerce')
-                # তারিখ অনুযায়ী ছোট থেকে বড় (পুরাতন থেকে নতুন) সাজানো
-                df = df.sort_values(by='temp_date', ascending=True)
-            
-            return df.to_dict('records')
-        except Exception as e:
-            st.error(f"ডাটা পড়তে সমস্যা: {e}")
-            return []
-    return []
-
-# --- ৩. FDR ফর্ম ---
-@st.dialog("➕ ADD NEW FDR")
-def open_add_fdr_form():
-    st.write("### NEW FDR ENTRY")
-    fdr_url = st.text_input("Bank Link (URL)")
-    amount = st.number_input("Amount (BDT)", min_value=0.0)
-    o_date = st.date_input("Opening Date", datetime.now())
-    m_date = st.date_input("Maturity Date", datetime.now())
-    status = st.selectbox("Status", ["Active", "Matured"])
-    
-    if st.button("CONFIRM SAVE", type="primary", use_container_width=True):
-        conn = db.connect_db()
-        if conn:
-            try:
-                ws = conn.worksheet("FDR_Data")
-                # নতুন আইডি জেনারেট করে ডাটা সেভ করা
-                ws.append_row([len(ws.get_all_values()), o_date.strftime('%m/%d/%y'), 
-                              m_date.strftime('%m/%d/%y'), amount, status, fdr_url])
-                st.success("Saved Successfully!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"সেভ করতে সমস্যা: {e}")
-
-# --- ৪. মেইন ডিজাইন (আপনার দেওয়া ডিজাইন হুবহু) ---
 def show():
-    user_role = st.session_state.get("role", "Member")
-    
-    st.markdown("""
-        <style>
-        .stApp { background-color: #0F172A; }
-        .fdr-card {
-            background: linear-gradient(145deg, #1e293b, #0f172a);
-            border-radius: 20px;
-            padding: 20px;
-            border: 1px solid #334155;
-            text-align: center;
-            transition: 0.3s;
-            box-shadow: 5px 5px 15px rgba(0,0,0,0.4);
-            margin-bottom: 20px;
-        }
-        .fdr-card:hover { border-color: #38BDF8; transform: translateY(-5px); }
-        .month-text { color: #38BDF8; font-size: 18px; font-weight: bold; text-transform: uppercase; margin-bottom: 0px; }
-        .year-text { color: #94A3B8; font-size: 14px; margin-bottom: 10px; }
-        .amount-text { color: #F8FAFC; font-size: 22px; font-weight: 800; margin: 10px 0; }
-        .status-badge {
-            padding: 4px 12px;
-            border-radius: 50px;
-            font-size: 10px;
-            font-weight: bold;
-            display: inline-block;
-        }
-        </style>
-    """, unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align:center; color:#38BDF8;'>📈 Business Statistics & Analytics</h1>", unsafe_allow_html=True)
+    st.write("---")
 
-    st.markdown("<h1 style='text-align:center; color:#38BDF8;'>🏦 SOCIETY BANKING</h1>", unsafe_allow_html=True)
+    # --- ১. ডাটা সংগ্রহ (গুগল শিট থেকে) ---
+    conn = db.connect_db()
+    total_savings = 0
+    total_fdr = 0
+    bank_balance = 0
 
-    tab1, tab2, tab3 = st.tabs(["🏠 DASHBOARD", "💰 FDR GRID", "🏦 SAVINGS"])
+    if conn:
+        try:
+            # ক. মেম্বার সেভিংস (Savings শিট থেকে) - ডুপ্লিকেট হেডার এরর ফিক্সসহ
+            ws_savings = conn.worksheet("Savings")
+            all_data = ws_savings.get_all_values()
+            if len(all_data) > 1:
+                # pandas দিয়ে ডাটা পড়া যাতে ডুপ্লিকেট কলামে সমস্যা না হয়
+                df_s = pd.DataFrame(all_data[1:], columns=all_data[0])
+                # ID, Name, Shares বাদ দিয়ে বাকি সব কলামের যোগফল
+                cols_to_sum = [c for c in df_s.columns if c not in ['ID', 'Name', 'Shares'] and c.strip() != '']
+                for col in cols_to_sum:
+                    total_savings += pd.to_numeric(df_s[col].str.replace(',', ''), errors='coerce').sum()
 
-    with tab1:
-        bal = get_savings_bal()
-        fdr_data = get_fdr_list()
-        # কমা বা টেক্সট হ্যান্ডেল করে টোটাল বের করা
-        fdr_total = sum(float(str(r['Amount']).replace(',', '')) for r in fdr_data if str(r['Amount']).replace('.','').isdigit()) if fdr_data else 0.0
+            # খ. FDR ইনভেস্টমেন্ট (FDR_Data শিট থেকে)
+            ws_fdr = conn.worksheet("FDR_Data")
+            fdr_data = ws_fdr.get_all_values()
+            if len(fdr_data) > 1:
+                df_f = pd.DataFrame(fdr_data[1:], columns=fdr_data[0])
+                total_fdr = pd.to_numeric(df_f['Amount'].str.replace(',', ''), errors='coerce').sum()
+
+            # গ. ব্যাংক ব্যালেন্স (Bank_Savings শিট থেকে)
+            ws_bank = conn.worksheet("Bank_Savings")
+            bank_val = ws_bank.cell(2, 1).value
+            bank_balance = float(bank_val) if bank_val else 0.0
+
+        except Exception as e:
+            st.error(f"ডাটা লোড এরর: {e}")
+
+    # --- ২. চার্ট প্রদর্শন ---
+    total_all = total_savings + total_fdr + bank_balance
+
+    if total_all > 0:
+        chart_df = pd.DataFrame({
+            "Category": ["Member Savings", "FDR Investment", "Bank Cash"],
+            "Amount": [total_savings, total_fdr, bank_balance]
+        })
+
+        fig = px.pie(chart_df, values='Amount', names='Category', hole=0.5,
+                     color_discrete_sequence=['#38BDF8', '#8B5CF6', '#F59E0B'],
+                     template="plotly_dark")
         
-        c1, c2 = st.columns(2)
+        st.plotly_chart(fig, use_container_width=True)
+
+        # --- ৩. স্ট্যাটাস কার্ডস ---
+        st.markdown("""
+            <style>
+            .stat-box { background: #1E293B; padding: 20px; border-radius: 15px; border-bottom: 4px solid #38BDF8; text-align: center; }
+            .stat-v { color: white; font-size: 22px; font-weight: bold; }
+            .stat-l { color: #94A3B8; font-size: 13px; }
+            </style>
+        """, unsafe_allow_html=True)
+
+        c1, c2, c3 = st.columns(3)
         with c1:
-            st.markdown(f'<div class="fdr-card"><div class="year-text">SAVINGS BALANCE</div><div class="amount-text">৳ {bal:,.2f}</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="stat-box"><div class="stat-l">মোট সঞ্চয়</div><div class="stat-v">৳{total_savings:,.0f}</div></div>', unsafe_allow_html=True)
         with c2:
-            st.markdown(f'<div class="fdr-card" style="border-top: 4px solid #8B5CF6;"><div class="year-text">TOTAL FDR</div><div class="amount-text">৳ {fdr_total:,.2f}</div></div>', unsafe_allow_html=True)
-
-    with tab2:
-        col_t, col_b = st.columns([3, 1])
-        with col_t: st.markdown("### 🏦 Monthly FDR Serial")
-        with col_b:
-            if user_role == "Admin":
-                if st.button("➕ ADD NEW"): open_add_fdr_form()
-
-        fdr_list = get_fdr_list() # সর্ট করা ডাটা আসবে
-        if not fdr_list:
-            st.info("গুগল শিটে কোনো FDR ডাটা পাওয়া যায়নি।")
-        else:
-            cols = st.columns(3)
-            for i, row in enumerate(fdr_list):
-                month, year = get_fdr_month_year(row.get('Open_Date', ''))
-                st_status = str(row.get('Status', 'Active'))
-                st_color = "#10B981" if st_status == "Active" else "#F59E0B"
-                bg_status = "#064E3B" if st_status == "Active" else "#78350F"
-                
-                with cols[i % 3]:
-                    st.markdown(f"""
-                        <div class="fdr-card">
-                            <div class="month-text">{month}</div>
-                            <div class="year-text">{year}</div>
-                            <hr style="border: 0.5px solid #334155; margin: 10px 0;">
-                            <div class="amount-text">৳ {float(str(row.get('Amount', 0)).replace(',', '')):,.0f}</div>
-                            <div class="status-badge" style="background:{bg_status}; color:{st_color};">
-                                ● {st_status.upper()}
-                            </div>
-                        </div>
-                    """, unsafe_allow_html=True)
-                    
-                    b1, b2 = st.columns(2)
-                    with b1:
-                        if row.get('Link'): st.link_button("🌐 VIEW", row['Link'], use_container_width=True)
-                    with b2:
-                        if user_role == "Admin":
-                            if st.button("🗑️", key=f"del_{i}", use_container_width=True):
-                                conn = db.connect_db()
-                                ws = conn.worksheet("FDR_Data")
-                                target = ws.find(str(row.get('ID', '')))
-                                if target:
-                                    ws.delete_rows(target.row)
-                                    st.rerun()
-
-    with tab3:
-        bal = get_savings_bal()
-        st.markdown(f'<div class="fdr-card" style="max-width:400px; margin:auto;"><div class="year-text">CURRENT BALANCE</div><div class="amount-text" style="color:#38BDF8;">৳ {bal:,.2f}</div></div>', unsafe_allow_html=True)
-        if user_role == "Admin":
-            st.write("---")
-            new_bal = st.number_input("Enter Updated Amount", value=float(bal))
-            if st.button("CONFIRM UPDATE", type="primary", use_container_width=True):
-                conn = db.connect_db()
-                conn.worksheet("Bank_Savings").update_cell(2, 1, new_bal)
-                st.success("Balance Updated!")
-                st.rerun()
+            st.markdown(f'<div class="stat-box" style="border-bottom-color:#8B5CF6;"><div class="stat-l">মোট FDR</div><div class="stat-v">৳{total_fdr:,.0f}</div></div>', unsafe_allow_html=True)
+        with c3:
+            st.markdown(f'<div class="stat-box" style="border-bottom-color:#F59E0B;"><div class="stat-l">ব্যাংক ক্যাশ</div><div class="stat-v">৳{bank_balance:,.0f}</div></div>', unsafe_allow_html=True)
+    else:
+        st.info("গুগল শিটে কোনো ডাটা পাওয়া যায়নি।")
