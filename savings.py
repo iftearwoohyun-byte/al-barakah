@@ -1,41 +1,23 @@
 import streamlit as st
 import pandas as pd
-import database as db  # আমরা যে নতুন database.py বানিয়েছি সেটা
+import database as db 
 from datetime import datetime
 
-# --- ১. ডাটা ফাংশন (এখন Google Sheets থেকে আসবে) ---
-def load_savings_data():
-    try:
-        sheet = db.connect_db()
-        worksheet = sheet.worksheet("Savings")
-        return pd.DataFrame(worksheet.get_all_records())
-    except:
-        return pd.DataFrame()
-
-# --- ২. কিস্তি জমার পপ-আপ (Google Sheets Sync সহ) ---
 @st.dialog("Collect Savings")
 def add_deposit():
     st.markdown("<h3 style='color:#1A365D;'>নতুন সঞ্চয় জমা করুন</h3>", unsafe_allow_html=True)
-    
-    # মেম্বার লিস্ট এখন গুগল শিট থেকে আসবে
-    members_data = db.get_members() 
+    members_data = db.get_live_data() # লাইভ ডাটা কল
     
     if not members_data:
-        st.error("মেম্বার লিস্ট খালি! গুগল শিটের 'Members' ট্যাবে মেম্বার যোগ করুন।")
+        st.error("মেম্বার লিস্ট পাওয়া যায়নি।")
         return
 
     names = [f"{m['Name']} (ID: {m['ID']})" for m in members_data]
     selected_member = st.selectbox("মেম্বার সিলেক্ট করুন", names)
     
-    # মাস তৈরির লজিক (আপনার আগের লজিক)
-    months = []
-    for year in ["25", "26", "27"]:
-        for m in ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]:
-            if year == "25" and m in ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct"]: continue
-            if year == "27" and m in ["Nov", "Dec"]: continue
-            months.append(f"{m}_{year}")
-    
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     selected_month = st.selectbox("মাস সিলেক্ট করুন", months)
+    selected_year = st.selectbox("বছর", ["2025", "2026", "2027"])
     
     m_id = selected_member.split("(ID: ")[1].replace(")", "")
     member = next((m for m in members_data if str(m['ID']) == m_id), None)
@@ -44,52 +26,28 @@ def add_deposit():
     amount = st.text_input("জমার পরিমাণ", value=str(default_amt))
 
     if st.button("CONFIRM SAVE", type="primary", use_container_width=True):
-        # গুগল শিটে ডাটা পাঠানোর ফরম্যাট: [Date, ID, Name, Amount, Month, Year]
         today = datetime.now().strftime("%d/%m/%Y")
-        month_only = selected_month.split("_")[0]
-        year_only = "20" + selected_month.split("_")[1]
+        row = [today, m_id, member['Name'], amount, selected_month, selected_year]
         
-        row_to_add = [today, m_id, member['Name'], amount, month_only, year_only]
-        
-        if db.add_savings(row_to_add): # database.py এর ফাংশন কল
-            st.success("গুগল শিটে সফলভাবে সেভ হয়েছে!")
+        if db.add_savings(row):
+            st.success("গুগল শিটে সেভ হয়েছে!")
             st.rerun()
         else:
             st.error("সেভ হতে সমস্যা হয়েছে।")
 
-# --- ৩. মেইন শো ফাংশন (ডিজাইন আগের মতোই) ---
 def show():
-    st.markdown("""
-        <style>
-        .savings-header { background-color: #1A365D; padding: 20px; text-align: center; border-radius: 8px; margin-bottom: 25px; }
-        .header-text { color: white !important; font-size: 24px; font-weight: bold; }
-        div.savings-btn-group button {
-            height: 100px !important; font-size: 18px !important;
-            background-color: #2D3748 !important; color: white !important; border-radius: 10px !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-
-    st.markdown('<div class="savings-header"><h1 class="header-text">AL-BARAKAH SAVINGS LEDGER (GOOGLE CLOUD)</h1></div>', unsafe_allow_html=True)
-
-    col1, col2, col3 = st.columns([2, 2, 4])
-    with col1:
-        if st.button("➕\nADD SAVINGS", key="add_sav_btn"):
-            add_deposit()
-    with col2:
-        if st.button("🔄\nREFRESH DATA", key="sync_sav_btn"):
-            st.rerun()
-
-    # ৪. ডাটা টেবিল (গুগল শিট থেকে ডাটা নিয়ে এসে দেখানো)
-    df_savings = load_savings_data()
+    st.markdown('<h1 style="text-align:center; color:#1A365D;">AL-BARAKAH SAVINGS LEDGER</h1>', unsafe_allow_html=True)
     
-    if not df_savings.empty:
-        # এখানে আপনার আগের ক্যালকুলেশন লজিক থাকবে
-        # গুগল শিট থেকে আসা ডাটাকে আপনার ডিজাইন অনুযায়ী সাজিয়ে নিন
-        search = st.text_input("🔍 মেম্বার খুঁজুন (নাম বা আইডি)", placeholder="Search here...")
-        if search:
-            df_savings = df_savings[df_savings['Name'].astype(str).str.contains(search, case=False) | df_savings['ID'].astype(str).str.contains(search)]
-        
-        st.table(df_savings)
-    else:
-        st.info("গুগল শিটে কোনো ডাটা পাওয়া যায়নি।")
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        if st.button("➕\nADD SAVINGS"):
+            add_deposit()
+
+    # শিট থেকে জমা হওয়া ডাটা দেখানো
+    sheet = db.connect_db()
+    if sheet:
+        savings_df = pd.DataFrame(sheet.worksheet("Savings").get_all_records())
+        if not savings_df.empty:
+            st.table(savings_df.tail(10)) # সর্বশেষ ১০টি এন্ট্রি
+        else:
+            st.info("কোনো সঞ্চয়ের ডাটা পাওয়া যায়নি।")
