@@ -10,9 +10,7 @@ def load_all_savings():
             worksheet = sheet.worksheet("Savings")
             data = worksheet.get_all_records()
             return data, worksheet
-        except Exception as e:
-            st.error(f"Error loading sheet: {e}")
-            return [], None
+        except: return [], None
     return [], None
 
 @st.dialog("Collect Savings")
@@ -29,40 +27,51 @@ def add_deposit():
     
     # আপনার শিটের কলাম অনুযায়ী মাস
     months = ["Nov_25", "Dec_25", "Jan_26", "Feb_26", "Mar_26", "Apr_26", "May_26", "Jun_26", "Jul_26", "Aug_26", "Sep_26", "Oct_26"]
-    selected_month = st.selectbox("মাস সিলেক্ট করুন", months)
+    selected_month = st.selectbox("কোন মাসের টাকা?", months)
     
     m_id = selected_member.split("(ID: ")[1].replace(")", "")
+    member_name = selected_member.split(" (ID:")[0]
     member = next((m for m in members_data if str(m['ID']) == m_id), None)
     
-    # জমার টাকা এবং জরিমানা আলাদা ইনপুট
     default_amt = int(member.get('Share', 1)) * 5000 if member else 5000
     
     col1, col2 = st.columns(2)
     with col1:
-        amount = st.number_input("সঞ্চয় জমা (টাকা)", value=default_amt, step=500)
+        amount = st.number_input("সঞ্চয় জমা (টাকা)", value=default_amt)
     with col2:
-        fine = st.number_input("জরিমানা/Late Fee", value=0, step=10)
-
-    total_to_save = amount + fine
+        fine = st.number_input("জরিমানা/Late Fee", value=0)
 
     if st.button("CONFIRM SAVE", type="primary", use_container_width=True):
-        data, worksheet = load_all_savings()
-        if worksheet:
+        conn = db.connect_db()
+        if conn:
             try:
-                all_ids = worksheet.col_values(1)
-                row_index = all_ids.index(str(m_id)) + 1
-                headers = worksheet.row_values(1)
-                col_index = headers.index(selected_month) + 1
+                # ১. মূল Savings শিট আপডেট
+                ws_sav = conn.worksheet("Savings")
+                all_ids = ws_sav.col_values(1)
+                row_idx = all_ids.index(str(m_id)) + 1
+                headers = ws_sav.row_values(1)
+                col_idx = headers.index(selected_month) + 1
                 
-                # মোট টাকা (জমা + জরিমানা) আপডেট করা
-                worksheet.update_cell(row_index, col_index, total_to_save)
-                
-                st.success(f"সফলভাবে {total_to_save} টাকা (জরিমানাসহ) সেভ হয়েছে!")
+                # এখানে শুধু জমার টাকাটা বসবে (অথবা আপনি চাইলে fine সহ যোগ করে দিতে পারেন)
+                total_entry = amount + fine 
+                ws_sav.update_cell(row_idx, col_idx, total_entry)
+
+                # ২. Late Fee শিটে আলাদা এন্ট্রি (যদি জরিমানা থাকে)
+                if fine > 0:
+                    try:
+                        ws_fine = conn.worksheet("Late_Fee")
+                        # কলাম: Name, Month, Amount
+                        ws_fine.append_row([member_name, selected_month, fine])
+                    except:
+                        st.warning("Late_Fee নামে কোনো ট্যাব খুঁজে পাওয়া যায়নি! জরিমানা আলাদাভাবে সেভ হয়নি।")
+
+                st.success("সফলভাবে সঞ্চয় ও জরিমানার হিসাব রাখা হয়েছে!")
                 st.rerun()
-            except:
-                st.error("শিটে ডাটা আপডেট করতে সমস্যা হয়েছে।")
+            except Exception as e:
+                st.error(f"Error: {e}")
 
 def show():
+    # --- ডিজাইন আগের মতোই থাকবে ---
     st.markdown("""
         <style>
         .savings-header { background-color: #1A365D; padding: 20px; text-align: center; border-radius: 8px; margin-bottom: 25px; }
@@ -79,37 +88,24 @@ def show():
     st.markdown("<br>", unsafe_allow_html=True)
 
     savings_data, _ = load_all_savings()
-    
     if savings_data:
         df = pd.DataFrame(savings_data)
         month_cols = ["Nov_25", "Dec_25", "Jan_26", "Feb_26", "Mar_26", "Apr_26", "May_26", "Jun_26", "Jul_26", "Aug_26", "Sep_26", "Oct_26"]
         
         table_rows = []
-        for index, row in df.iterrows():
+        for _, row in df.iterrows():
             total_bal = 0
-            last_paid_month = "No Payment"
-            
-            # মাস কলামগুলো চেক করে Last Paid Month বের করা
+            last_month = "None"
             for m in month_cols:
                 if m in row and row[m] != "" and row[m] != 0:
-                    try:
-                        val = float(row[m])
-                        total_bal += val
-                        last_paid_month = m.replace("_", " ") # যেমন: Jan 26
-                    except: continue
+                    total_bal += float(row[m])
+                    last_month = m.replace("_", " ")
             
             table_rows.append({
                 "ID": f"{int(row['ID']):03d}",
                 "Member Name": row['Name'],
-                "Last Paid Month": last_paid_month,
+                "Last Paid": last_month,
                 "Total Balance": f"{total_bal:,.2f}"
             })
 
-        display_df = pd.DataFrame(table_rows)
-        search = st.text_input("🔍 মেম্বার খুঁজুন", placeholder="নাম বা আইডি...")
-        if search:
-            display_df = display_df[display_df['Member Name'].str.contains(search, case=False) | display_df['ID'].astype(str).str.contains(search)]
-
-        st.table(display_df)
-    else:
-        st.info("গুগল শিটে কোনো ডাটা নেই।")
+        st.table(pd.DataFrame(table_rows))
