@@ -1,40 +1,31 @@
 import streamlit as st
-import pandas as pd
-import io
+import json
 import os
+import io
+import pandas as pd
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
-import database as db 
+import database as db # গুগল শিট কানেকশনের জন্য
 
-# --- ১. গুগল শিট থেকে ডাটা লোড (এরর-প্রুফ পদ্ধতি) ---
-def load_data_from_gsheet():
+# --- ১. গুগল শিট থেকে ডাটা লোড (এরর ছাড়া) ---
+def load_savings():
     conn = db.connect_db()
     if conn:
         try:
             worksheet = conn.worksheet("Savings")
-            # সরাসরি values রিড করা হচ্ছে যাতে ডুপ্লিকেট হেডার সমস্যা না হয়
+            # ডুপ্লিকেট হেডার এরর এড়াতে values দিয়ে ডাটা পড়া
             all_values = worksheet.get_all_values()
-            
             if len(all_values) > 1:
-                # প্রথম লাইন থেকে হেডার নেওয়া এবং খালি ঘরগুলো ম্যানেজ করা
                 headers = [h.strip() if h.strip() != "" else f"empty_{i}" for i, h in enumerate(all_values[0])]
-                data_rows = all_values[1:]
-                
-                # ডাটাফ্রেম তৈরি এবং বাড়তি খালি কলাম ফিল্টার
-                df = pd.DataFrame(data_rows, columns=headers)
+                df = pd.DataFrame(all_values[1:], columns=headers)
                 valid_cols = [c for c in df.columns if not c.startswith('empty_')]
-                df = df[valid_cols]
-                
-                return df.to_dict('records')
-            return []
+                return df[valid_cols].to_dict('records')
         except Exception as e:
-            st.error(f"Error reading Savings sheet: {e}")
-            return []
+            st.error(f"Error: {e}")
     return []
 
-# মাসের সংক্ষিপ্ত নামকে পূর্ণ নামে রূপান্তর
 MONTH_MAP = {
     "Jan": "January", "Feb": "February", "Mar": "March", "Apr": "April",
     "May": "May", "Jun": "June", "Jul": "July", "Aug": "August",
@@ -47,13 +38,13 @@ def get_full_month_name(text):
             return text.replace(short, full)
     return text
 
-# --- ২. PDF জেনারেশন (ফুটার টেক্সটসহ) ---
+# --- ২. PDF জেনারেশন লজিক (হুবহু আপনার অরিজিনাল কোড অনুযায়ী) ---
 def generate_bank_style_pdf(member):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     w, h = A4
     
-    # লোগো ও ব্যাকগ্রাউন্ড ডিজাইন
+    # লোগো ওয়াটারমার্ক এবং ডিজাইন (আপনার দেওয়া কোড অনুযায়ী)
     if os.path.exists("logo.png"):
         c.saveState()
         c.setFillAlpha(0.07)
@@ -61,7 +52,6 @@ def generate_bank_style_pdf(member):
         c.restoreState()
         c.drawImage("logo.png", 50, h-90, width=60, height=60, mask='auto')
 
-    # হেডার সেকশন
     c.setStrokeColor(colors.black)
     c.setLineWidth(1)
     c.line(40, h-105, w-40, h-105) 
@@ -70,23 +60,26 @@ def generate_bank_style_pdf(member):
     c.drawCentredString(w/2 + 20, h-55, "AL-BARAKAH BUSINESS SOCIETY")
     c.setFont("Helvetica", 10)
     c.drawCentredString(w/2 + 20, h-75, "Barahatia, Lohagara, Chattogram")
+    c.setFont("Helvetica-Bold", 9)
+    c.drawCentredString(w/2 + 20, h-90, "Estd: 2025")
     
     c.setFont("Helvetica-Bold", 12)
     c.drawCentredString(w/2, h-125, " MEMBER STATEMENT")
     
-    # মেম্বার ইনফো
     c.setFont("Helvetica-Bold", 11)
-    c.drawString(50, h-160, f"ACCOUNT HOLDER : {str(member.get('Name', '')).upper()}")
-    c.drawString(50, h-175, f"MEMBER ID      : # {int(member.get('ID', 0)):03d}")
+    c.drawString(50, h-160, f"ACCOUNT HOLDER : {str(member['Name']).upper()}")
+    c.drawString(50, h-175, f"MEMBER ID      : # {int(member['ID']):03d}")
+    
     c.setFont("Helvetica", 9)
-    c.drawRightString(w-50, h-160, f"Date: {datetime.now().strftime('%d %b, %Y')}")
+    c.drawRightString(w-50, h-160, f"Statement Date: {datetime.now().strftime('%d %b, %Y')}")
+    c.drawRightString(w-50, h-175, "Status: ACTIVE")
 
-    # টেবিল হেডার
     y = h - 215
     c.setFont("Helvetica-Bold", 11)
     c.drawString(60, y, "SL")
     c.drawString(100, y, "Description / Month")
-    c.drawRightString(w-70, y, "Deposit (BDT)")
+    c.drawRightString(w-70, y, "Credit Amount (BDT)")
+    c.setLineWidth(1.5)
     c.line(50, y-5, w-50, y-5)
 
     y -= 25
@@ -94,96 +87,111 @@ def generate_bank_style_pdf(member):
     sl = 1
     ignore_list = ['ID', 'Name', 'Shares', 'Share']
     
-    # ট্রানজাকশন লিস্ট
     c.setFont("Helvetica", 10)
     for k, v in member.items():
         if k not in ignore_list and v not in ['', '0', 0, None]:
             try:
-                if y < 100: # নতুন পেজ হ্যান্ডেলিং
-                    c.showPage()
-                    y = h - 50
-                
                 c.drawString(60, y, f"{sl:02d}")
                 full_desc = get_full_month_name(k.replace("_", " "))
-                c.drawString(100, y, f"Savings - {full_desc}")
+                c.drawString(100, y, f"Savings Deposit - {full_desc}")
                 
                 amt = float(str(v).replace(",", ""))
                 c.drawRightString(w-70, y, f"{amt:,.2f}")
                 total += amt
                 sl += 1
                 y -= 22
+                
+                c.setDash(2, 4) 
+                c.setStrokeColor(colors.lightgrey)
+                c.line(50, y+12, w-50, y+12)
+                c.setDash(1, 0)
             except: continue
 
-    # টোটাল ব্যালেন্স
     y -= 25
+    c.setStrokeColor(colors.black)
     c.setFont("Helvetica-Bold", 12)
     c.drawString(50, y, "TOTAL ACCUMULATED:")
     c.drawRightString(w-70, y, f"{total:,.2f} BDT")
     
-    # --- আপনার কাঙ্ক্ষিত ফুটার টেক্সট (এটি এখন পেজের একদম নিচে আসবে) ---
+    # আপনার অরিজিনাল ফুটার লাইন
     c.setFont("Helvetica-Oblique", 8)
     c.setFillColor(colors.gray)
-    c.drawCentredString(w/2, 40, "This document is automatically generated by the system and does not require a physical signature.")
+    c.drawCentredString(w/2, 60, "This document is automatically generated by the system and does not require a physical signature.")
     
     c.showPage()
     c.save()
     buffer.seek(0)
     return buffer
 
-# --- ৩. মেইন UI ড্যাশবোর্ড ---
+# --- ৩. UI ডিজাইন (আপনার অরিজিনাল কোড অনুযায়ী হুবহু) ---
 def show():
     st.markdown("""
         <style>
-        .ledger-header { background-color: #2D3748; padding: 15px; text-align: center; border-radius: 5px; margin-bottom: 20px; }
-        .header-text { color: #F7FAFC !important; font-weight: bold; margin: 0; }
-        .total-box { text-align: right; padding: 15px; background-color: #F7FAFC; border: 1px solid #CBD5E0; border-radius: 5px; margin-top: 10px; }
+        .ledger-header {
+            background-color: #2D3748;
+            padding: 15px;
+            text-align: center;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .header-text { color: #F7FAFC !important; font-family: 'Segoe UI'; font-weight: bold; margin: 0; }
+        div[data-testid="stTextInput"] label { color: #4A5568 !important; font-weight: bold; }
+        .total-box {
+            text-align: right;
+            padding: 10px;
+            background-color: #F7FAFC;
+            border: 1px solid #CBD5E0;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
         </style>
     """, unsafe_allow_html=True)
 
     st.markdown('<div class="ledger-header"><h2 class="header-text">📊 MEMBER LEDGER DASHBOARD</h2></div>', unsafe_allow_html=True)
 
-    m_id = st.text_input("Search Member ID:", placeholder="Enter ID here...")
-    
-    if m_id:
-        data = load_data_from_gsheet()
-        # আইডি সার্চ (স্পেস ট্রিম করে)
-        member = next((s for s in data if str(s.get('ID', '')).strip() == str(m_id).strip()), None)
+    with st.container():
+        m_id = st.text_input("Search Member ID:", placeholder="Enter ID and press Enter...")
         
-        if member:
-            st.markdown(f"<h3 style='color:#2B6CB0;'>👤 ACCOUNT: {str(member.get('Name', '')).upper()}</h3>", unsafe_allow_html=True)
+        if m_id:
+            # সরাসরি গুগল শিট থেকে ডাটা আনা
+            data = load_savings()
+            member = next((s for s in data if str(s['ID']) == m_id), None)
             
-            table_data = []
-            total = 0
-            idx = 1
-            ignore_list = ['ID', 'Name', 'Shares', 'Share']
-            
-            for k, v in member.items():
-                if k not in ignore_list and v not in ['', '0', 0, None]:
-                    try:
-                        val = float(str(v).replace(",", ""))
-                        table_data.append([f"{idx:02d}", f"Savings - {get_full_month_name(k.replace('_', ' '))}", f"{val:,.2f}"])
-                        total += val
-                        idx += 1
-                    except: continue
-            
-            # স্ক্রিনে টেবিল দেখানো
-            st.table(pd.DataFrame(table_data, columns=["SL", "Description", "Amount (BDT)"]))
+            if member:
+                st.markdown(f"<h3 style='color:#2B6CB0;'>👤 ACCOUNT: {member['Name'].upper()} (ID: {member['ID']})</h3>", unsafe_allow_html=True)
+                
+                table_data = []
+                total = 0
+                idx = 1
+                ignore_list = ['ID', 'Name', 'Shares', 'Share']
+                
+                for k, v in member.items():
+                    if k not in ignore_list and v not in ['', '0', 0, None]:
+                        try:
+                            val = float(str(v).replace(",", ""))
+                            full_desc = get_full_month_name(k.replace("_", " "))
+                            table_data.append([f"{idx:02d}", f"Savings - {full_desc}", f"{val:,.2f}"])
+                            total += val
+                            idx += 1
+                        except: continue
+                
+                df = pd.DataFrame(table_data, columns=["SL", "Transaction Month/Description", "Deposit Amount (BDT)"])
+                st.table(df)
 
-            st.markdown(f"""
-                <div class="total-box">
-                    <h3 style="color:#2F855A; margin:0;">Total Balance: {total:,.2f} BDT</h3>
-                </div>
-            """, unsafe_allow_html=True)
+                st.markdown(f"""
+                    <div class="total-box">
+                        <h3 style="color:#2F855A; margin:0;">Total Accumulated: {total:,.2f} BDT</h3>
+                    </div>
+                """, unsafe_allow_html=True)
 
-            st.divider()
-            # PDF ডাউনলোড বাটন
-            pdf_bytes = generate_bank_style_pdf(member)
-            st.download_button(
-                label="📥 DOWNLOAD STATEMENT (PDF)",
-                data=pdf_bytes,
-                file_name=f"Statement_{m_id}.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
-        else:
-            st.warning(f"ID #{m_id} এর কোনো তথ্য পাওয়া যায়নি। অনুগ্রহ করে সঠিক আইডি দিন।")
+                st.divider()
+                pdf_bytes = generate_bank_style_pdf(member)
+                st.download_button(
+                    label="📥 DOWNLOAD MEMBER STATEMENT",
+                    data=pdf_bytes,
+                    file_name=f"Statement_{member['ID']}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+            else:
+                st.error("❌ ID Not Found!")
