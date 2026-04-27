@@ -8,15 +8,28 @@ from reportlab.pdfgen import canvas
 from reportlab.lib import colors
 import database as db 
 
-# --- ১. গুগল শিট থেকে সরাসরি ডাটা লোড ---
+# --- ১. এরর-প্রুফ ডাটা লোড (ডুপ্লিকেট হেডার ইগনোর করবে) ---
 def load_data_from_gsheet():
     conn = db.connect_db()
     if conn:
         try:
-            # সরাসরি 'Savings' শিট থেকে ডাটা রিড করা হচ্ছে
             worksheet = conn.worksheet("Savings")
-            data = worksheet.get_all_records()
-            return data
+            # get_all_records() এর বদলে get_all_values() ব্যবহার করা হয়েছে
+            all_values = worksheet.get_all_values()
+            
+            if len(all_values) > 1:
+                # প্রথম লাইন থেকে হেডার নেওয়া এবং খালি ঘরগুলো বাদ দেওয়া
+                headers = [h.strip() if h.strip() != "" else f"empty_{i}" for i, h in enumerate(all_values[0])]
+                data_rows = all_values[1:]
+                
+                # নতুন হেডার দিয়ে ডাটাফ্রেম তৈরি
+                df = pd.DataFrame(data_rows, columns=headers)
+                # ডুপ্লিকেট বা অটো জেনারেটেড 'empty_' কলামগুলো ফিল্টার করে ফেলে দেওয়া
+                valid_cols = [c for c in df.columns if not c.startswith('empty_')]
+                df = df[valid_cols]
+                
+                return df.to_dict('records')
+            return []
         except Exception as e:
             st.error(f"Error reading Savings sheet: {e}")
             return []
@@ -34,13 +47,12 @@ def get_full_month_name(text):
             return text.replace(short, full)
     return text
 
-# --- ২. PDF জেনারেশন (আপনার অরিজিনাল ডিজাইন ও ওয়াটারমার্কসহ) ---
+# --- ২. PDF জেনারেশন (আপনার অরিজিনাল ডিজাইন) ---
 def generate_bank_style_pdf(member):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     w, h = A4
     
-    # লোগো ও ডিজাইন
     if os.path.exists("logo.png"):
         c.saveState()
         c.setFillAlpha(0.07)
@@ -56,8 +68,6 @@ def generate_bank_style_pdf(member):
     c.drawCentredString(w/2 + 20, h-55, "AL-BARAKAH BUSINESS SOCIETY")
     c.setFont("Helvetica", 10)
     c.drawCentredString(w/2 + 20, h-75, "Barahatia, Lohagara, Chattogram")
-    c.setFont("Helvetica-Bold", 9)
-    c.drawCentredString(w/2 + 20, h-90, "Estd: 2025")
     
     c.setFont("Helvetica-Bold", 12)
     c.drawCentredString(w/2, h-125, " MEMBER STATEMENT")
@@ -66,9 +76,6 @@ def generate_bank_style_pdf(member):
     c.drawString(50, h-160, f"ACCOUNT HOLDER : {str(member.get('Name', '')).upper()}")
     c.drawString(50, h-175, f"MEMBER ID      : # {int(member.get('ID', 0)):03d}")
     
-    c.setFont("Helvetica", 9)
-    c.drawRightString(w-50, h-160, f"Date: {datetime.now().strftime('%d %b, %Y')}")
-
     y = h - 215
     c.setFont("Helvetica-Bold", 11)
     c.drawString(60, y, "SL")
@@ -79,7 +86,6 @@ def generate_bank_style_pdf(member):
     y -= 25
     total = 0
     sl = 1
-    # কলামের নাম শিট অনুযায়ী চেক করা হবে
     ignore_list = ['ID', 'Name', 'Shares', 'Share']
     
     c.setFont("Helvetica", 10)
@@ -107,7 +113,7 @@ def generate_bank_style_pdf(member):
     buffer.seek(0)
     return buffer
 
-# --- ৩. UI ড্যাশবোর্ড (আপনার অরিজিনাল সিএসএস লুক) ---
+# --- ৩. ড্যাশবোর্ড ডিসপ্লে ---
 def show():
     st.markdown("""
         <style>
@@ -119,12 +125,12 @@ def show():
 
     st.markdown('<div class="ledger-header"><h2 class="header-text">📊 MEMBER LEDGER DASHBOARD</h2></div>', unsafe_allow_html=True)
 
-    m_id = st.text_input("Search Member ID:", placeholder="Enter ID...")
+    m_id = st.text_input("Search Member ID:", key="ledger_search")
     
     if m_id:
-        # গুগল শিট থেকে ফ্রেশ ডাটা আনা হচ্ছে
         data = load_data_from_gsheet()
-        member = next((s for s in data if str(s.get('ID', '')) == str(m_id)), None)
+        # আইডি ম্যাচিং করার সময় স্ট্রিং কনভার্ট করে চেক করা
+        member = next((s for s in data if str(s.get('ID', '')).strip() == str(m_id).strip()), None)
         
         if member:
             st.markdown(f"<h3 style='color:#2B6CB0;'>👤 ACCOUNT: {str(member.get('Name', '')).upper()}</h3>", unsafe_allow_html=True)
@@ -146,14 +152,10 @@ def show():
             
             st.table(pd.DataFrame(table_data, columns=["SL", "Description", "Amount (BDT)"]))
 
-            st.markdown(f"""
-                <div class="total-box">
-                    <h3 style="color:#2F855A; margin:0;">Total Balance: {total:,.2f} BDT</h3>
-                </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"""<div class="total-box"><h3 style="color:#2F855A; margin:0;">Total: {total:,.2f} BDT</h3></div>""", unsafe_allow_html=True)
 
             st.divider()
             pdf_bytes = generate_bank_style_pdf(member)
             st.download_button("📥 DOWNLOAD STATEMENT", pdf_bytes, f"Statement_{m_id}.pdf", "application/pdf", use_container_width=True)
         else:
-            st.error("❌ এই আইডি-র কোনো ডাটা গুগল শিটে পাওয়া যায়নি!")
+            st.warning(f"ID #{m_id} এর কোনো তথ্য পাওয়া যায়নি। সঠিক আইডি দিন।")
