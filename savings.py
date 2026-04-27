@@ -13,7 +13,7 @@ def load_all_savings():
         except: return [], None
     return [], None
 
-@st.dialog("Collect Savings")
+@st.dialog("Collect Savings & Late Fee")
 def add_deposit():
     st.markdown("<h3 style='color:#1A365D;'>নতুন সঞ্চয় ও জরিমানা জমা</h3>", unsafe_allow_html=True)
     members_data = db.get_live_data() 
@@ -37,41 +37,37 @@ def add_deposit():
     
     col1, col2 = st.columns(2)
     with col1:
-        amount = st.number_input("সঞ্চয় জমা (টাকা)", value=default_amt)
+        amount = st.number_input("সঞ্চয় জমা (টাকা)", value=default_amt, step=500)
     with col2:
-        fine = st.number_input("জরিমানা/Late Fee", value=0)
+        fine = st.number_input("জরিমানা / Late Fee (টাকা)", value=0, step=50)
 
     if st.button("CONFIRM SAVE", type="primary", use_container_width=True):
         conn = db.connect_db()
         if conn:
             try:
-                # ১. মূল Savings শিট আপডেট
+                # ১. মূল Savings শিটে শুধুমাত্র সঞ্চয় আপডেট
                 ws_sav = conn.worksheet("Savings")
                 all_ids = ws_sav.col_values(1)
                 row_idx = all_ids.index(str(m_id)) + 1
                 headers = ws_sav.row_values(1)
                 col_idx = headers.index(selected_month) + 1
-                
-                # এখানে শুধু জমার টাকাটা বসবে (অথবা আপনি চাইলে fine সহ যোগ করে দিতে পারেন)
-                total_entry = amount + fine 
-                ws_sav.update_cell(row_idx, col_idx, total_entry)
+                ws_sav.update_cell(row_idx, col_idx, amount) # জরিমানা ছাড়া শুধু জমা
 
-                # ২. Late Fee শিটে আলাদা এন্ট্রি (যদি জরিমানা থাকে)
+                # ২. Late Fee শিটে জরিমানার তথ্য আলাদাভাবে সেভ
                 if fine > 0:
                     try:
-                        ws_fine = conn.worksheet("Late_Fee")
-                        # কলাম: Name, Month, Amount
+                        ws_fine = conn.worksheet("Late Fee") # শিটের নাম হুবহু মিল থাকতে হবে
                         ws_fine.append_row([member_name, selected_month, fine])
                     except:
-                        st.warning("Late_Fee নামে কোনো ট্যাব খুঁজে পাওয়া যায়নি! জরিমানা আলাদাভাবে সেভ হয়নি।")
+                        st.warning("গুগল শিটে 'Late Fee' নামে কোনো ট্যাব খুঁজে পাওয়া যায়নি!")
 
-                st.success("সফলভাবে সঞ্চয় ও জরিমানার হিসাব রাখা হয়েছে!")
+                st.success(f"সফলভাবে {amount} টাকা সঞ্চয় এবং {fine} টাকা জরিমানা আলাদাভাবে সেভ হয়েছে!")
                 st.rerun()
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"Error updating database: {e}")
 
 def show():
-    # --- ডিজাইন আগের মতোই থাকবে ---
+    # ডিজাইন কোড আপনার আগের মতোই থাকছে
     st.markdown("""
         <style>
         .savings-header { background-color: #1A365D; padding: 20px; text-align: center; border-radius: 8px; margin-bottom: 25px; }
@@ -98,14 +94,18 @@ def show():
             last_month = "None"
             for m in month_cols:
                 if m in row and row[m] != "" and row[m] != 0:
-                    total_bal += float(row[m])
-                    last_month = m.replace("_", " ")
+                    try:
+                        total_bal += float(row[m])
+                        last_month = m.replace("_", " ")
+                    except: continue
             
             table_rows.append({
                 "ID": f"{int(row['ID']):03d}",
                 "Member Name": row['Name'],
                 "Last Paid": last_month,
-                "Total Balance": f"{total_bal:,.2f}"
+                "Total Savings": f"{total_bal:,.2f}"
             })
 
         st.table(pd.DataFrame(table_rows))
+    else:
+        st.info("গুগল শিটে কোনো ডাটা নেই।")
