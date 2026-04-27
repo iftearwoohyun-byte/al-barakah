@@ -1,23 +1,27 @@
 import streamlit as st
-import json
-import os
-import io
 import pandas as pd
+import io
+import os
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
+import database as db  # গুগল শিট কানেকশনের জন্য
 
-# --- ১. ডাটা লোড ও মাসের নাম ঠিক করার ফাংশন ---
-SAVINGS_FILE = "savings_data.json"
-
-def load_savings():
-    if os.path.exists(SAVINGS_FILE):
-        try:
-            with open(SAVINGS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except: return []
-    return []
+# --- ১. ডাটা লোড করার ফাংশন (এখন গুগল শিট থেকে আসবে) ---
+def load_data_from_gsheet():
+    try:
+        # database.py এর ফাংশন ব্যবহার করে 'Savings' শিটের ডাটা আনা
+        data, _ = db.get_live_data_savings() # অথবা আপনার database.py অনুযায়ী ফাংশন নাম
+        if not data:
+            # যদি স্পেসিফিক ফাংশন না থাকে তবে সাধারণ ডাটা রিড
+            conn = db.connect_db()
+            ws = conn.worksheet("Savings")
+            data = ws.get_all_records()
+        return data
+    except Exception as e:
+        st.error(f"Error connecting to Sheets: {e}")
+        return []
 
 MONTH_MAP = {
     "Jan": "January", "Feb": "February", "Mar": "March", "Apr": "April",
@@ -31,13 +35,12 @@ def get_full_month_name(text):
             return text.replace(short, full)
     return text
 
-# --- ২. PDF জেনারেশন লজিক (আপনার Tkinter কোড অনুযায়ী) ---
+# --- ২. PDF জেনারেশন লজিক (হুবহু আগের ডিজাইন) ---
 def generate_bank_style_pdf(member):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     w, h = A4
     
-    # লোগো ওয়াটারমার্ক এবং ডিজাইন
     if os.path.exists("logo.png"):
         c.saveState()
         c.setFillAlpha(0.07)
@@ -60,8 +63,8 @@ def generate_bank_style_pdf(member):
     c.drawCentredString(w/2, h-125, " MEMBER STATEMENT")
     
     c.setFont("Helvetica-Bold", 11)
-    c.drawString(50, h-160, f"ACCOUNT HOLDER : {str(member['Name']).upper()}")
-    c.drawString(50, h-175, f"MEMBER ID      : # {int(member['ID']):03d}")
+    c.drawString(50, h-160, f"ACCOUNT HOLDER : {str(member.get('Name', '')).upper()}")
+    c.drawString(50, h-175, f"MEMBER ID      : # {int(member.get('ID', 0)):03d}")
     
     c.setFont("Helvetica", 9)
     c.drawRightString(w-50, h-160, f"Statement Date: {datetime.now().strftime('%d %b, %Y')}")
@@ -78,7 +81,8 @@ def generate_bank_style_pdf(member):
     y -= 25
     total = 0
     sl = 1
-    ignore_list = ['ID', 'Name', 'Shares']
+    # শিটের কলাম অনুযায়ী ইগনোর লিস্ট
+    ignore_list = ['ID', 'Name', 'Shares', 'Share']
     
     c.setFont("Helvetica", 10)
     for k, v in member.items():
@@ -115,53 +119,33 @@ def generate_bank_style_pdf(member):
     buffer.seek(0)
     return buffer
 
-# --- ৩. UI ডিজাইন (Tkinter লুক বজায় রেখে) ---
+# --- ৩. UI ডিজাইন (আপনার অরিজিনাল কোড অনুযায়ী) ---
 def show():
-    # CSS দিয়ে লুক ঠিক করা
     st.markdown("""
         <style>
-        .ledger-header {
-            background-color: #2D3748;
-            padding: 15px;
-            text-align: center;
-            border-radius: 5px;
-            margin-bottom: 20px;
-        }
+        .ledger-header { background-color: #2D3748; padding: 15px; text-align: center; border-radius: 5px; margin-bottom: 20px; }
         .header-text { color: #F7FAFC !important; font-family: 'Segoe UI'; font-weight: bold; margin: 0; }
-        
-        /* সার্চ বক্সের স্টাইল */
-        div[data-testid="stTextInput"] label { color: #4A5568 !important; font-weight: bold; }
-        
-        /* টোটাল বক্স */
-        .total-box {
-            text-align: right;
-            padding: 10px;
-            background-color: #F7FAFC;
-            border: 1px solid #CBD5E0;
-            border-radius: 5px;
-            margin-top: 10px;
-        }
+        .total-box { text-align: right; padding: 10px; background-color: #F7FAFC; border: 1px solid #CBD5E0; border-radius: 5px; margin-top: 10px; }
         </style>
     """, unsafe_allow_html=True)
 
     st.markdown('<div class="ledger-header"><h2 class="header-text">📊 MEMBER LEDGER DASHBOARD</h2></div>', unsafe_allow_html=True)
 
-    # কার্ডের মতো কন্টেইনার
     with st.container():
         m_id = st.text_input("Search Member ID:", placeholder="Enter ID and press Enter...")
         
         if m_id:
-            data = load_savings()
-            member = next((s for s in data if str(s['ID']) == m_id), None)
+            # সরাসরি গুগল শিট থেকে ডাটা কল
+            data = load_data_from_gsheet()
+            member = next((s for s in data if str(s.get('ID', '')) == str(m_id)), None)
             
             if member:
-                st.markdown(f"<h3 style='color:#2B6CB0;'>👤 ACCOUNT: {member['Name'].upper()} (ID: {member['ID']})</h3>", unsafe_allow_html=True)
+                st.markdown(f"<h3 style='color:#2B6CB0;'>👤 ACCOUNT: {str(member.get('Name', '')).upper()} (ID: {member.get('ID', '')})</h3>", unsafe_allow_html=True)
                 
-                # টেবিল ডাটা তৈরি
                 table_data = []
                 total = 0
                 idx = 1
-                ignore_list = ['ID', 'Name', 'Shares']
+                ignore_list = ['ID', 'Name', 'Shares', 'Share']
                 
                 for k, v in member.items():
                     if k not in ignore_list and v not in ['', '0', 0, None]:
@@ -173,26 +157,23 @@ def show():
                             idx += 1
                         except: continue
                 
-                # ডাটাফ্রেম টেবিল
                 df = pd.DataFrame(table_data, columns=["SL", "Transaction Month/Description", "Deposit Amount (BDT)"])
-                st.table(df) # Treeview স্টাইল পেতে st.table
+                st.table(df)
 
-                # টোটাল সেকশন
                 st.markdown(f"""
                     <div class="total-box">
                         <h3 style="color:#2F855A; margin:0;">Total Accumulated: {total:,.2f} BDT</h3>
                     </div>
                 """, unsafe_allow_html=True)
 
-                # পিডিএফ বাটন
                 st.divider()
                 pdf_bytes = generate_bank_style_pdf(member)
                 st.download_button(
                     label="📥 DOWNLOAD MEMBER STATEMENT",
                     data=pdf_bytes,
-                    file_name=f"Statement_{member['ID']}.pdf",
+                    file_name=f"Statement_{member.get('ID', '0')}.pdf",
                     mime="application/pdf",
                     use_container_width=True
                 )
             else:
-                st.error("❌ ID Not Found!")
+                st.error("❌ ID Not Found in Google Sheet!")
