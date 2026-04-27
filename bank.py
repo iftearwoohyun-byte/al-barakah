@@ -3,110 +3,158 @@ import pandas as pd
 from datetime import datetime
 import database as db 
 
-# --- ১. ডাটাবেজ কানেকশন ও সর্টিং ---
-def get_clean_fdr_data():
+# --- ১. মাস ও সাল বের করার ফাংশন ---
+def get_fdr_month_year(date_str):
+    try:
+        dt = datetime.strptime(str(date_str), '%m/%d/%y')
+        return dt.strftime("%B"), dt.strftime("%Y")
+    except:
+        return "N/A", "N/A"
+
+# --- ২. ডাটাবেজ ফাংশন (সর্টিং লজিকসহ) ---
+def get_savings_bal():
+    conn = db.connect_db()
+    if conn:
+        try:
+            ws = conn.worksheet("Bank_Savings")
+            return float(ws.cell(2, 1).value or 0)
+        except: return 0.0
+    return 0.0
+
+def get_fdr_list():
     conn = db.connect_db()
     if conn:
         try:
             ws = conn.worksheet("FDR_Data")
             data = ws.get_all_records()
             if not data: return []
+            
+            # --- সিরিয়াল করার ম্যাজিক এখানে ---
             df = pd.DataFrame(data)
-            # তারিখ অনুযায়ী সিরিয়াল করা
+            # তারিখ কলামকে আসল ডেট ফরম্যাটে রূপান্তর (যাতে কম্পিউটার সিরিয়াল বোঝে)
             df['temp_date'] = pd.to_datetime(df['Open_Date'], format='%m/%d/%y', errors='coerce')
+            # তারিখ অনুযায়ী সাজানো (পুরানো থেকে নতুন)
             df = df.sort_values(by='temp_date', ascending=True)
             return df.to_dict('records')
         except: return []
     return []
 
-def get_savings_data():
-    conn = db.connect_db()
-    if conn:
-        try:
-            ws = conn.worksheet("Bank_Savings")
-            val = ws.cell(2, 1).value
-            return float(val) if val else 0.0
-        except: return 0.0
-    return 0.0
-
-# --- ২. FDR অ্যাড করার ডায়ালগ (এরর-ফ্রি) ---
+# --- ৩. FDR ফর্ম ---
 @st.dialog("➕ ADD NEW FDR")
-def open_fdr_form():
-    st.write("### FDR Entry Form")
-    f_url = st.text_input("Bank Receipt Link")
-    f_amt = st.number_input("Amount", min_value=0.0)
-    f_date = st.date_input("Date", datetime.now())
-    if st.button("SAVE"):
+def open_add_fdr_form():
+    st.write("### NEW FDR ENTRY")
+    fdr_url = st.text_input("Bank Link (URL)")
+    amount = st.number_input("Amount (BDT)", min_value=0.0)
+    o_date = st.date_input("Opening Date", datetime.now())
+    m_date = st.date_input("Maturity Date", datetime.now())
+    status = st.selectbox("Status", ["Active", "Matured"])
+    
+    if st.button("CONFIRM SAVE", type="primary", use_container_width=True):
         conn = db.connect_db()
-        ws = conn.worksheet("FDR_Data")
-        ws.append_row([len(ws.get_all_values()), f_date.strftime('%m/%d/%y'), "", f_amt, "Active", f_url])
-        st.rerun()
+        if conn:
+            ws = conn.worksheet("FDR_Data")
+            ws.append_row([len(ws.get_all_values()), o_date.strftime('%m/%d/%y'), 
+                          m_date.strftime('%m/%d/%y'), amount, status, fdr_url])
+            st.success("Saved Successfully!")
+            st.rerun()
 
-# --- ৩. মেইন শো ফাঞ্চন (ইউনিক সিরিয়াল গ্রিড) ---
+# --- ৪. মেইন ইউনিক ডিজাইন (হুবহু আপনার কোড) ---
 def show():
     user_role = st.session_state.get("role", "Member")
     
-    # লাক্সারি ডিজাইন CSS
     st.markdown("""
         <style>
         .stApp { background-color: #0F172A; }
-        .main-card {
-            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-            border-radius: 15px; padding: 20px; border-left: 5px solid #38BDF8;
-            text-align: center; box-shadow: 0 10px 20px rgba(0,0,0,0.3); margin-bottom: 20px;
+        .fdr-card {
+            background: linear-gradient(145deg, #1e293b, #0f172a);
+            border-radius: 20px;
+            padding: 20px;
+            border: 1px solid #334155;
+            text-align: center;
+            transition: 0.3s;
+            box-shadow: 5px 5px 15px rgba(0,0,0,0.4);
+            margin-bottom: 20px;
         }
-        .month-text { color: #38BDF8; font-size: 20px; font-weight: bold; }
-        .amt-text { color: white; font-size: 24px; font-weight: bold; }
+        .fdr-card:hover { border-color: #38BDF8; transform: translateY(-5px); }
+        .month-text { color: #38BDF8; font-size: 18px; font-weight: bold; text-transform: uppercase; margin-bottom: 0px; }
+        .year-text { color: #94A3B8; font-size: 14px; margin-bottom: 10px; }
+        .amount-text { color: #F8FAFC; font-size: 22px; font-weight: 800; margin: 10px 0; }
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 50px;
+            font-size: 10px;
+            font-weight: bold;
+            display: inline-block;
+        }
         </style>
     """, unsafe_allow_html=True)
 
-    st.markdown("<h1 style='text-align:center;'>🏦 BANKING MANAGEMENT</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align:center; color:#38BDF8;'>🏦 SOCIETY BANKING</h1>", unsafe_allow_html=True)
 
-    # ডাটা লোড করা
-    savings_bal = get_savings_data()
-    fdr_list = get_clean_fdr_data()
-    total_fdr = sum(float(str(r['Amount']).replace(',','')) for r in fdr_list)
+    tab1, tab2, tab3 = st.tabs(["🏠 DASHBOARD", "💰 FDR GRID", "🏦 SAVINGS"])
 
-    tab1, tab2, tab3 = st.tabs(["🏠 OVERVIEW", "📅 FDR GRID", "🏦 SAVINGS"])
-
-    # OVERVIEW: যেখানে আগে ডাটা গায়েব ছিল
     with tab1:
+        bal = get_savings_bal()
+        fdr_data = get_fdr_list()
+        fdr_total = sum(float(str(r['Amount']).replace(',', '')) for r in fdr_data) if fdr_data else 0.0
+        
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown(f'<div class="main-card"><p style="color:#94A3B8;">SAVINGS</p><p class="amt-text">৳ {savings_bal:,.2f}</p></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="fdr-card"><div class="year-text">SAVINGS BALANCE</div><div class="amount-text">৳ {bal:,.2f}</div></div>', unsafe_allow_html=True)
         with c2:
-            st.markdown(f'<div class="main-card" style="border-left-color:#8B5CF6;"><p style="color:#94A3B8;">TOTAL FDR</p><p class="amt-text">৳ {total_fdr:,.2f}</p></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="fdr-card" style="border-top: 4px solid #8B5CF6;"><div class="year-text">TOTAL FDR</div><div class="amount-text">৳ {fdr_total:,.2f}</div></div>', unsafe_allow_html=True)
 
-    # FDR GRID: সিরিয়াল অনুযায়ী
     with tab2:
-        if user_role == "Admin":
-            if st.button("➕ ADD FDR"): open_fdr_form()
-        
-        if fdr_list:
+        col_t, col_b = st.columns([3, 1])
+        with col_t: st.markdown("### 🏦 Active FDR Records")
+        with col_b:
+            if user_role == "Admin":
+                if st.button("➕ ADD NEW"): open_add_fdr_form()
+
+        fdr_list = get_fdr_list() # এটি এখন সর্ট করা ডাটা আনবে
+        if not fdr_list:
+            st.info("No FDR data found in Google Sheets.")
+        else:
             cols = st.columns(3)
             for i, row in enumerate(fdr_list):
-                try:
-                    dt = datetime.strptime(str(row['Open_Date']), '%m/%d/%y')
-                    month, year = dt.strftime("%B"), dt.strftime("%Y")
-                except: month, year = "N/A", ""
+                month, year = get_fdr_month_year(row['Open_Date'])
+                st_color = "#10B981" if row['Status'] == "Active" else "#F59E0B"
+                bg_status = "#064E3B" if row['Status'] == "Active" else "#78350F"
                 
                 with cols[i % 3]:
                     st.markdown(f"""
-                        <div class="main-card">
+                        <div class="fdr-card">
                             <div class="month-text">{month}</div>
-                            <div style="color:#94A3B8; font-size:12px;">{year}</div>
-                            <div class="amt-text" style="font-size:20px;">৳ {float(row['Amount']):,.0f}</div>
+                            <div class="year-text">{year}</div>
+                            <hr style="border: 0.5px solid #334155; margin: 10px 0;">
+                            <div class="amount-text">৳ {float(row['Amount']):,.0f}</div>
+                            <div class="status-badge" style="background:{bg_status}; color:{st_color};">
+                                ● {row['Status'].upper()}
+                            </div>
                         </div>
                     """, unsafe_allow_html=True)
-                    if row['Link']: st.link_button("🌐 VIEW", row['Link'], use_container_width=True)
+                    
+                    btn_col1, btn_col2 = st.columns(2)
+                    with btn_col1:
+                        if row['Link']: st.link_button("🌐 VIEW", row['Link'], use_container_width=True)
+                    with btn_col2:
+                        if user_role == "Admin":
+                            if st.button("🗑️", key=f"del_{i}", use_container_width=True):
+                                conn = db.connect_db()
+                                ws = conn.worksheet("FDR_Data")
+                                target = ws.find(str(row['ID'])) # ID দিয়ে রো মুছে ফেলা
+                                if target:
+                                    ws.delete_rows(target.row)
+                                    st.rerun()
 
-    # SAVINGS: ডাটা আপডেট করার অপশন
     with tab3:
-        st.markdown(f'<div class="main-card"><p class="amt-text">Current: ৳ {savings_bal:,.2f}</p></div>', unsafe_allow_html=True)
+        bal = get_savings_bal()
+        st.markdown(f'<div class="fdr-card" style="max-width:400px; margin:auto;"><div class="year-text">CURRENT BALANCE</div><div class="amount-text" style="color:#38BDF8;">৳ {bal:,.2f}</div></div>', unsafe_allow_html=True)
         if user_role == "Admin":
-            new_val = st.number_input("Update Savings Balance", value=float(savings_bal))
-            if st.button("CONFIRM UPDATE"):
+            st.write("---")
+            new_bal = st.number_input("Enter Updated Amount", value=float(bal))
+            if st.button("CONFIRM UPDATE", type="primary", use_container_width=True):
                 conn = db.connect_db()
-                conn.worksheet("Bank_Savings").update_cell(2, 1, new_val)
-                st.success("Updated!")
+                conn.worksheet("Bank_Savings").update_cell(2, 1, new_bal)
+                st.success("Balance Updated!")
                 st.rerun()
