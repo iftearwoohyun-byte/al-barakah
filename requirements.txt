@@ -3,3 +3,5 @@ pandas
 plotly
 reportlab
 streamlit-option-menu
+gspread
+google-auth
