@@ -5,3 +5,10 @@ reportlab
 streamlit-option-menu
 gspread
 google-auth
+streamlit
+gspread
+google-auth
+requests
+beautifulsoup4
+reportlab
+pandas
