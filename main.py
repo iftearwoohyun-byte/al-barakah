@@ -23,13 +23,13 @@ swipe_js = """
 
     function handleGesture() {
         // বাম থেকে ডানে টান দিলে (সাইডবার ওপেন)
-        if (touchendX - touchstartX > 100) {
+        if (touchendX - touchstartX > 50) {
             const sidebarButton = doc.querySelector('button[kind="headerNoPadding"]');
             if (sidebarButton) sidebarButton.click();
         }
         // ডান থেকে বামে টান দিলে (সাইডবার ক্লোজ)
-        if (touchstartX - touchendX > 100) {
-            const sidebarButton = doc.querySelector('button[kind="headerNoPadding"]');
+        if (touchstartX - touchendX > 50) {
+            const sidebarButton = doc.querySelectorr('button[kind="headerNoPadding"]');
             if (sidebarButton) sidebarButton.click();
         }
     }
