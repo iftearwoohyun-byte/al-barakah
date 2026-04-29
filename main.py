@@ -1,7 +1,45 @@
 import streamlit as st
 import os
 import home, members, savings, statement, bank, ledger, receipts
+import streamlit as st
 
+# --- Swipe Gesture যোগ করার জন্য JavaScript কোড ---
+swipe_js = """
+<script>
+    const doc = window.parent.document;
+    let touchstartX = 0;
+    let touchendX = 0;
+
+    // আঙুল রাখা শুরু করলে
+    doc.addEventListener('touchstart', e => {
+        touchstartX = e.changedTouches[0].screenX;
+    }, false);
+
+    // আঙুল সরানো শেষ করলে
+    doc.addEventListener('touchend', e => {
+        touchendX = e.changedTouches[0].screenX;
+        handleGesture();
+    }, false);
+
+    function handleGesture() {
+        // বাম থেকে ডানে টান দিলে (সাইডবার ওপেন)
+        if (touchendX - touchstartX > 100) {
+            const sidebarButton = doc.querySelector('button[kind="headerNoPadding"]');
+            if (sidebarButton) sidebarButton.click();
+        }
+        // ডান থেকে বামে টান দিলে (সাইডবার ক্লোজ)
+        if (touchstartX - touchendX > 100) {
+            const sidebarButton = doc.querySelector('button[kind="headerNoPadding"]');
+            if (sidebarButton) sidebarButton.click();
+        }
+    }
+</script>
+"""
+
+# অ্যাপে এই স্ক্রিপ্টটি রান করা
+st.components.v1.html(swipe_js, height=0)
+
+# আপনার বাকি কোড নিচে আগের মতোই থাকবে...
 # ---------------- Page Configuration ----------------
 st.set_page_config(
     page_title="Al-Barakah Management Pro",
