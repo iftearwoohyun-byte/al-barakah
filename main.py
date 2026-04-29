@@ -1,10 +1,10 @@
 import streamlit as st
 import os
-import home, members, savings, statement, bank, ledger, statistics, receipts
+import home, members, savings, statement, bank, ledger, receipts
 
 # ---------------- Page Configuration ----------------
 st.set_page_config(
-    page_title="Al-Barakah Management Software Pro",
+    page_title="Al-Barakah Management Pro",
     page_icon="🏢",
     layout="wide"
 )
@@ -85,7 +85,7 @@ def login_page():
             login_submit = st.form_submit_button(f"Login as {st.session_state.role}", use_container_width=True)
 
             if login_submit:
-                if st.session_state.role == "Admin" and user_id == "barakah" and password == "abbs2027":
+                if st.session_state.role == "Admin" and user_id == "admin" and password == "abbs2027":
                     st.session_state.logged_in = True
                     st.rerun()
                 elif st.session_state.role == "Member" and password == "12345":
@@ -111,7 +111,6 @@ else:
                 "📊 Member Statement": statement, 
                 "🏦 Bank Data": bank, 
                 "📒 Ledger": ledger,
-                "📈 Statistics": statistics, 
                 "🧾 Receipts": receipts
             }
         else:
@@ -121,7 +120,6 @@ else:
                 "📊 Member Statement": statement, 
                 "🏦 Bank Data": bank, 
                 "📒 Ledger": ledger,
-                "📈 Statistics": statistics
             }
 
         for name in pages:
