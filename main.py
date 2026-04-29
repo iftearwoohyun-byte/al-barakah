@@ -3,55 +3,65 @@ import os
 import home, members, savings, statement, bank, ledger, receipts
 import streamlit as st
 
-# --- উন্নত সোয়াইপ এবং অটো-হাইড জাভাস্ক্রিপ্ট ---
-enhanced_js = """
+# --- Force Close & Swipe JavaScript ---
+final_js = """
 <script>
     const doc = window.parent.document;
-    let touchstartX = 0;
-    let touchendX = 0;
 
-    // ১. সোয়াইপ সেন্সর (৫০ পিক্সেল)
-    doc.addEventListener('touchstart', e => {
-        touchstartX = e.changedTouches[0].screenX;
-    }, false);
-
-    doc.addEventListener('touchend', e => {
-        touchendX = e.changedTouches[0].screenX;
-        handleGesture();
-    }, false);
-
-    function handleGesture() {
-        const sidebarButton = doc.querySelector('button[kind="headerNoPadding"]');
-        if (!sidebarButton) return;
-
-        // বাম থেকে ডানে (ওপেন)
-        if (touchendX - touchstartX > 50) {
-            sidebarButton.click();
-        }
-        // ডান থেকে বামে (ক্লোজ)
-        if (touchstartX - touchendX > 50) {
-            sidebarButton.click();
+    // ১. সাইডবার বন্ধ করার মেইন ফাংশন
+    function closeSidebar() {
+        // স্ট্রীমলিটের সাইডবার বাটন ধরার ৩টি সম্ভাব্য উপায়
+        const btn1 = doc.querySelector('button[kind="headerNoPadding"]');
+        const btn2 = doc.querySelector('[data-testid="stSidebarCollapseButton"]');
+        
+        // যদি বাটন পাওয়া যায় এবং সাইডবার ওপেন থাকে (বাটনটি তখন ক্লোজ আইকন দেখায়)
+        if (btn1) {
+            btn1.click();
+        } else if (btn2) {
+            btn2.click();
         }
     }
 
-    // ২. অটো-হাইড লজিক: সাইডবারের কোনো বাটনে ক্লিক করলেই মেনু বন্ধ হবে
-    doc.addEventListener('click', function(e) {
-        // চেক করা হচ্ছে ক্লিকটি সাইডবারের ভেতরের কোনো অপশনে হয়েছে কি না
-        const isSidebarItem = e.target.closest('[data-testid="stSidebarNav"]');
-        const sidebarButton = doc.querySelector('button[kind="headerNoPadding"]');
+    // ২. মেনু আইটেমে ক্লিক করলে অটো হাইড
+    // একটু সময় পর পর চেক করবে সাইডবার মেনু তৈরি হয়েছে কি না
+    setInterval(() => {
+        const navItems = doc.querySelectorAll('[data-testid="stSidebarNav"] a, [data-testid="stSidebarNav"] button');
+        navItems.forEach(item => {
+            if (!item.getAttribute('data-click-listener')) {
+                item.addEventListener('click', () => {
+                    setTimeout(closeSidebar, 300); // ক্লিক করার ০.৩ সেকেন্ড পর বন্ধ হবে
+                });
+                item.setAttribute('data-click-listener', 'true');
+            }
+        });
+    }, 1000);
+
+    // ৩. সোয়াইপ গেসচার (৫০ পিক্সেল)
+    let touchstartX = 0;
+    doc.addEventListener('touchstart', e => {
+        touchstartX = e.changedTouches[0].screenX;
+    }, {passive: true});
+
+    doc.addEventListener('touchend', e => {
+        let touchendX = e.changedTouches[0].screenX;
+        let diff = touchendX - touchstartX;
         
-        if (isSidebarItem && sidebarButton) {
-            // ধুম করে হাইড করার জন্য ক্লিক ইভেন্ট ট্রিগার
-            setTimeout(() => {
-                sidebarButton.click();
-            }, 300); // ৩০০ মিলিসেকেন্ড সময় দেওয়া হয়েছে যাতে পেজ লোড শুরু হতে পারে
+        const sidebar = doc.querySelector('[data-testid="stSidebar"]');
+        const isExpanded = sidebar ? sidebar.getAttribute('aria-expanded') === 'true' : false;
+
+        // বাম থেকে ডানে টানলে এবং সাইডবার বন্ধ থাকলে -> ওপেন হবে
+        if (diff > 50 && !isExpanded) {
+            closeSidebar();
         }
-    });
+        // ডান থেকে বামে টানলে এবং সাইডবার খোলা থাকলে -> বন্ধ হবে
+        if (diff < -50 && isExpanded) {
+            closeSidebar();
+        }
+    }, {passive: true});
 </script>
 """
 
-# ইনজেক্ট করা
-st.components.v1.html(enhanced_js, height=0)
+st.components.v1.html(final_js, height=0)
 
 # ---------------- Page Configuration ----------------
 st.set_page_config(
