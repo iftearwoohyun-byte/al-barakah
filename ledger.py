@@ -1,127 +1,167 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
-import json
-import os
 from datetime import datetime
+import database as db 
 
-# --- ডাটাবেস সেটআপ (খরচ সেভ করার জন্য) ---
-def init_db():
-    conn = sqlite3.connect("somiti_ultimate_v5.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS expenses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT,
-            description TEXT,
-            category TEXT,
-            amount REAL
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-def show():
-    st.header("📒 Daily Cash Ledger")
-    init_db()
-
-    # --- ১. নতুন লেনদেন (Expense) যোগ করার সেকশন ---
-    with st.expander("➕ ADD NEW TRANSACTION (EXPENSE)"):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            ex_date = st.date_input("Date", datetime.now()).strftime("%Y-%m-%d")
-        with col2:
-            ex_cat = st.selectbox("Category", ["Office Stationery", "Rent", "Salary", "Electricity", "Others"])
-        with col3:
-            ex_amount = st.number_input("Amount", min_value=0.0, step=100.0)
-        
-        ex_desc = st.text_input("Description (e.g., Office Paper purchase)")
-        
-        if st.button("Save Transaction"):
-            if ex_amount > 0 and ex_desc != "":
-                conn = sqlite3.connect("somiti_ultimate_v5.db")
-                cursor = conn.cursor()
-                cursor.execute("INSERT INTO expenses (date, description, category, amount) VALUES (?, ?, ?, ?)",
-                               (ex_date, ex_desc, ex_cat, ex_amount))
-                conn.commit()
-                conn.close()
-                st.success("Expense recorded successfully!")
-                st.rerun()
-            else:
-                st.warning("Please enter amount and description.")
-
-    # --- ২. ডাটা সংগ্রহ (Income & Expense) ---
-    all_data = []
-
-    # (ক) Income: Member Savings (JSON ফাইল থেকে আনা)
-    if os.path.exists("savings_data.json"):
-        with open("savings_data.json", "r", encoding="utf-8") as f:
-            savings = json.load(f)
-            for s in savings:
+# --- ১. ডাটাবেজ ফাংশন (খরচ ও জমা) ---
+def get_ledger_data():
+    conn = db.connect_db()
+    income_list = []
+    expense_list = []
+    
+    if conn:
+        try:
+            # (ক) জমা: ফরম ফি (ফিক্সড ১০,০০০/-)
+            income_list.append({
+                "তারিখ": "প্রারম্ভিক",
+                "খাত": "ফরম ফি (২০ শেয়ার x ৫০০)",
+                "পরিমাণ": 10000.0
+            })
+            
+            # (খ) জমা: মেম্বার সেভিংস (Savings শিট থেকে)
+            ws_savings = conn.worksheet("Savings")
+            savings_data = ws_savings.get_all_records()
+            for row in savings_data:
                 member_total = 0
-                for k, v in s.items():
-                    if k not in ['ID', 'Name', 'Shares'] and v != '':
+                for k, v in row.items():
+                    if k not in ['ID', 'Name', 'Shares', 'Total', 'Remarks']:
                         try:
                             val = float(str(v).replace(",", ""))
                             member_total += val
                         except: pass
                 
                 if member_total > 0:
-                    all_data.append({
-                        "Date": "Multiple", # বা নির্দিষ্ট তারিখ দিতে পারেন
-                        "Description": f"Savings from {s['Name']} (ID: {s['ID']})",
-                        "Category": "Income (Savings)",
-                        "Debit (+)": member_total,
-                        "Credit (-)": 0.0
+                    income_list.append({
+                        "তারিখ": "চলমান",
+                        "খাত": f"সঞ্চয়: {row['Name']}",
+                        "পরিমাণ": member_total
                     })
 
-    # (খ) Expense: ডাটাবেস থেকে খরচ আনা
-    conn = sqlite3.connect("somiti_ultimate_v5.db")
-    expenses_df = pd.read_sql("SELECT date, description, category, amount FROM expenses", conn)
-    conn.close()
+            # (গ) খরচ: Expense শিট থেকে (যদি থাকে)
+            try:
+                ws_expense = conn.worksheet("Expenses")
+                expenses = ws_expense.get_all_records()
+                for ex in expenses:
+                    expense_list.append({
+                        "তারিখ": ex.get('Date', 'N/A'),
+                        "খাত": ex.get('Description', 'খরচ'),
+                        "পরিমাণ": float(str(ex.get('Amount', 0)).replace(',', ''))
+                    })
+            except: pass
+            
+        except Exception as e:
+            st.error(f"ডাটা লোড এরর: {e}")
+            
+    return income_list, expense_list
 
-    for index, row in expenses_df.iterrows():
-        all_data.append({
-            "Date": row['date'],
-            "Description": row['description'],
-            "Category": row['category'],
-            "Debit (+)": 0.0,
-            "Credit (-)": row['amount']
-        })
+# --- ২. খরচ যোগ করার ফরম ---
+@st.dialog("💸 নতুন খরচ যোগ করুন")
+def add_expense_form():
+    st.write("### EXPENSE ENTRY")
+    e_date = st.date_input("তারিখ", datetime.now())
+    e_desc = st.text_input("খরচের খাত (বিস্তারিত)")
+    e_amount = st.number_input("টাকার পরিমাণ", min_value=0.0)
+    
+    if st.button("সেভ করুন", type="primary", use_container_width=True):
+        if e_desc and e_amount > 0:
+            conn = db.connect_db()
+            ws = conn.worksheet("Expenses")
+            ws.append_row([e_date.strftime('%Y-%m-%d'), e_desc, e_amount])
+            st.success("খরচ সফলভাবে যোগ হয়েছে!")
+            st.rerun()
 
-    # --- ৩. টেবিল তৈরি এবং ব্যালেন্স ক্যালকুলেশন ---
-    if all_data:
-        df = pd.DataFrame(all_data)
-        
-        # ব্যালেন্স কলাম তৈরি
-        df['Balance'] = df['Debit (+)'] - df['Credit (-)']
-        # ক্রমপুঞ্জিত যোগফল (Cumulative Sum) দিয়ে রানিং ব্যালেন্স বের করা
-        df['Balance'] = df['Balance'].cumsum()
+def show():
+    # লাক্সারি ডিজাইন CSS
+    st.markdown("""
+        <style>
+        .ledger-box {
+            background: #1E293B;
+            padding: 20px;
+            border-radius: 15px;
+            border: 1px solid #334155;
+            height: 100%;
+        }
+        .header-text { color: #38BDF8; font-size: 20px; font-weight: bold; margin-bottom: 15px; text-align: center; }
+        .balance-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            background: #0F172A;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .balance-table th, .balance-table td {
+            padding: 12px;
+            text-align: center;
+            border-bottom: 1px solid #334155;
+        }
+        .balance-table th { background: #38BDF8; color: black; }
+        </style>
+    """, unsafe_allow_html=True)
 
-        # সুন্দর ফরমেটে দেখানো
-        st.subheader("Transaction History")
-        st.dataframe(df.style.format({
-            "Debit (+)": "{:,.2f}",
-            "Credit (-)": "{:,.2f}",
-            "Balance": "{:,.2f}"
-        }), use_container_width=True, hide_index=True)
+    st.markdown("<h1 style='text-align:center; color:#38BDF8;'>📒 Daily Cash Ledger</h1>", unsafe_allow_html=True)
+    st.write("---")
 
-        # ৪. সামারি কার্ডস
-        st.write("---")
-        c1, c2, c3 = st.columns(3)
-        total_in = df['Debit (+)'].sum()
-        total_out = df['Credit (-)'].sum()
-        c1.metric("Total Income", f"৳{total_in:,.2f}")
-        c2.metric("Total Expense", f"৳{total_out:,.2f}")
-        c3.metric("Net Cash in Hand", f"৳{(total_in - total_out):,.2f}", delta_color="normal")
+    # বাটন সেকশন
+    c_btn1, c_btn2 = st.columns([1, 1])
+    with c_btn1:
+        if st.button("➕ অন্যান্য জমা যোগ করুন", use_container_width=True):
+            st.info("এই ফিচারটি শীঘ্রই আসবে!")
+    with c_btn2:
+        if st.button("💸 খরচ যোগ করুন", type="primary", use_container_width=True):
+            add_expense_form()
 
-    else:
-        st.info("No transactions found. Add an expense or check savings data.")
+    # ডাটা সংগ্রহ
+    income_data, expense_data = get_ledger_data()
+    df_income = pd.DataFrame(income_data)
+    df_expense = pd.DataFrame(expense_data)
 
-# CSS দিয়ে টেবিল এবং ফন্ট স্টাইল ঠিক করা
-st.markdown("""
-    <style>
-    [data-testid="stHeader"] {background-color: rgba(0,0,0,0);}
-    .stDataFrame {border: 1px solid #2d3e4b; border-radius: 8px;}
-    </style>
-""", unsafe_allow_html=True)
+    # পাশাপাশি দুই কলাম
+    col_left, col_right = st.columns(2)
+
+    with col_left:
+        st.markdown('<div class="ledger-box"><div class="header-text">📥 জমার লিস্ট (Income)</div>', unsafe_allow_html=True)
+        if not df_income.empty:
+            st.dataframe(df_income, use_container_width=True, hide_index=True)
+            total_in = df_income['পরিমাণ'].sum()
+            st.markdown(f"<h3 style='text-align:right; color:#22C55E;'>মোট জমা: ৳{total_in:,.0f}</h3>", unsafe_allow_html=True)
+        else: st.write("কোনো জমার তথ্য নেই")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with col_right:
+        st.markdown('<div class="ledger-box"><div class="header-text">📤 খরচের লিস্ট (Expense)</div>', unsafe_allow_html=True)
+        if not df_expense.empty:
+            st.dataframe(df_expense, use_container_width=True, hide_index=True)
+            total_out = df_expense['পরিমাণ'].sum()
+            st.markdown(f"<h3 style='text-align:right; color:#EF4444;'>মোট খরচ: ৳{total_out:,.0f}</h3>", unsafe_allow_html=True)
+        else: st.info("এখনো কোনো খরচ রেকর্ড করা হয়নি")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # --- ৩. বর্তমান ব্যালেন্স টেবিল ---
+    st.write("---")
+    st.markdown("<div class='header-text'>💰 বর্তমান স্থিতির হিসাব</div>", unsafe_allow_html=True)
+    
+    total_in = df_income['পরিমাণ'].sum() if not df_income.empty else 0
+    total_out = df_expense['পরিমাণ'].sum() if not df_expense.empty else 0
+    net_balance = total_in - total_out
+
+    st.markdown(f"""
+        <table class="balance-table">
+            <tr>
+                <th>বিবরণ</th>
+                <th>টাকার পরিমাণ</th>
+            </tr>
+            <tr>
+                <td>মোট সংগৃহীত ফান্ড (Income)</td>
+                <td style="color:#22C55E;">৳ {total_in:,.2f}</td>
+            </tr>
+            <tr>
+                <td>মোট খরচ (Expense)</td>
+                <td style="color:#EF4444;">৳ {total_out:,.2f}</td>
+            </tr>
+            <tr style="background: #1E293B; font-weight: bold;">
+                <td style="color: #38BDF8;">অবশিষ্ট ক্যাশ ব্যালেন্স (Net Cash)</td>
+                <td style="color: #38BDF8; font-size: 1.2em;">৳ {net_balance:,.2f}</td>
+            </tr>
+        </table>
+    """, unsafe_allow_html=True)
