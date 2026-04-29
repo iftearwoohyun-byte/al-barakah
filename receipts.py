@@ -100,7 +100,7 @@ def show():
     st.markdown('<div class="receipt-header"><h1>🧾 Bulk Receipt Generation</h1></div>', unsafe_allow_html=True)
     
     # ডাটা সেভ না হওয়ার সতর্কবার্তা
-    st.warning("⚠️ সতর্কতা: আপনি যে ডাটা এন্ট্রি করছেন তা সাময়িক। রিফ্রেশ করলে ডাটা মুছে যাবে। স্থায়ীভাবে সেভ করতে Google Sheets কানেক্ট করা প্রয়োজন।")
+    st.warning("⚠️ সতর্কতা: প্রতি মাসের রিসিপ্ট প্রতি মাসে প্রদান করিতে হবে")
 
     with st.container(border=True):
         col1, col2 = st.columns(2)
