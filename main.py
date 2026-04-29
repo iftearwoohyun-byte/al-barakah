@@ -3,43 +3,56 @@ import os
 import home, members, savings, statement, bank, ledger, receipts
 import streamlit as st
 
-# --- Swipe Gesture যোগ করার জন্য JavaScript কোড ---
-swipe_js = """
+# --- উন্নত সোয়াইপ এবং অটো-হাইড জাভাস্ক্রিপ্ট ---
+enhanced_js = """
 <script>
     const doc = window.parent.document;
     let touchstartX = 0;
     let touchendX = 0;
 
-    // আঙুল রাখা শুরু করলে
+    // ১. সোয়াইপ সেন্সর (৫০ পিক্সেল)
     doc.addEventListener('touchstart', e => {
         touchstartX = e.changedTouches[0].screenX;
     }, false);
 
-    // আঙুল সরানো শেষ করলে
     doc.addEventListener('touchend', e => {
         touchendX = e.changedTouches[0].screenX;
         handleGesture();
     }, false);
 
     function handleGesture() {
-        // বাম থেকে ডানে টান দিলে (সাইডবার ওপেন)
+        const sidebarButton = doc.querySelector('button[kind="headerNoPadding"]');
+        if (!sidebarButton) return;
+
+        // বাম থেকে ডানে (ওপেন)
         if (touchendX - touchstartX > 50) {
-            const sidebarButton = doc.querySelector('button[kind="headerNoPadding"]');
-            if (sidebarButton) sidebarButton.click();
+            sidebarButton.click();
         }
-        // ডান থেকে বামে টান দিলে (সাইডবার ক্লোজ)
+        // ডান থেকে বামে (ক্লোজ)
         if (touchstartX - touchendX > 50) {
-            const sidebarButton = doc.querySelectorr('button[kind="headerNoPadding"]');
-            if (sidebarButton) sidebarButton.click();
+            sidebarButton.click();
         }
     }
+
+    // ২. অটো-হাইড লজিক: সাইডবারের কোনো বাটনে ক্লিক করলেই মেনু বন্ধ হবে
+    doc.addEventListener('click', function(e) {
+        // চেক করা হচ্ছে ক্লিকটি সাইডবারের ভেতরের কোনো অপশনে হয়েছে কি না
+        const isSidebarItem = e.target.closest('[data-testid="stSidebarNav"]');
+        const sidebarButton = doc.querySelector('button[kind="headerNoPadding"]');
+        
+        if (isSidebarItem && sidebarButton) {
+            // ধুম করে হাইড করার জন্য ক্লিক ইভেন্ট ট্রিগার
+            setTimeout(() => {
+                sidebarButton.click();
+            }, 300); // ৩০০ মিলিসেকেন্ড সময় দেওয়া হয়েছে যাতে পেজ লোড শুরু হতে পারে
+        }
+    });
 </script>
 """
 
-# অ্যাপে এই স্ক্রিপ্টটি রান করা
-st.components.v1.html(swipe_js, height=0)
+# ইনজেক্ট করা
+st.components.v1.html(enhanced_js, height=0)
 
-# আপনার বাকি কোড নিচে আগের মতোই থাকবে...
 # ---------------- Page Configuration ----------------
 st.set_page_config(
     page_title="Al-Barakah Management Pro",
